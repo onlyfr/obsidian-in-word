@@ -154,7 +154,8 @@ export function createSettingsApi(ctx: SettingsCtx) {
       this.toggleEl.append(this.inputEl);
       containerEl.append(this.toggleEl);
       this.primary = this.inputEl;
-      this.inputEl.addEventListener("change", () => {
+      // `click` (not `change`): also fires for programmatic clicks on detached elements, and for Space/Enter.
+      this.inputEl.addEventListener("click", () => {
         this.sync();
         this.emit();
       });
