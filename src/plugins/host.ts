@@ -33,6 +33,7 @@ export interface PluginCommand {
   name: string;
   callback?: () => void;
   editorCallback?: (editor: unknown, view: unknown) => void;
+  editorCheckCallback?: (checking: boolean, editor: unknown, view: unknown) => boolean | void;
   hotkeys?: { modifiers: string[]; key: string }[];
 }
 
@@ -193,11 +194,13 @@ export class PluginHost {
             getActiveViewOfType: () => null,
             getActiveFile: () => null,
             trigger: () => {},
+            // Plugins call this after changing their editor extensions; re-read them from the host.
+            updateOptions: () => host.onChange(),
           } as Record<string, unknown>,
           { get: (t, k) => (k in t ? t[k as string] : (use(`app.workspace.${String(k)}`), undefined)) },
         ),
         vault: new Proxy(
-          { on: () => ({}), getAbstractFileByPath: () => null, getMarkdownFiles: () => [], adapter: noop(use, "app.vault.adapter") } as Record<string, unknown>,
+          { on: () => ({}), getAbstractFileByPath: () => null, getMarkdownFiles: () => [], config: {}, adapter: noop(use, "app.vault.adapter") } as Record<string, unknown>,
           { get: (t, k) => (k in t ? t[k as string] : (use(`app.vault.${String(k)}`), undefined)) },
         ),
         metadataCache: { on: () => ({}), getFileCache: () => null },
@@ -210,7 +213,19 @@ export class PluginHost {
       Component,
       Plugin,
       Notice,
-      Platform: { isDesktop: true, isMobile: false, isMacOS: /Mac/.test(navigator.platform), isWin: /Win/.test(navigator.platform) },
+      // A browser-hosted add-in is neither the desktop app nor mobile. isDesktop must be false so plugins
+      // do not take their Node `fs`/`path` code paths (Latex Suite does this for snippet files).
+      Platform: {
+        isDesktop: false,
+        isDesktopApp: false,
+        isMobile: false,
+        isMobileApp: false,
+        isMacOS: /Mac/.test(navigator.platform),
+        isWin: /Win/.test(navigator.platform),
+      },
+      TAbstractFile: class {},
+      TFile: class {},
+      TFolder: class {},
       PluginSettingTab: class {},
       Modal: class {},
       Setting: class {

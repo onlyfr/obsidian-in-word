@@ -73,3 +73,44 @@ describe("PluginHost", () => {
     expect(host.extensions()).toHaveLength(1);
   });
 });
+
+describe("PluginHost compatibility details", () => {
+  it("is not the desktop app, so plugins skip their Node fs/path code paths", async () => {
+    const src = `
+      const { Plugin, Platform, TFile } = require("obsidian");
+      module.exports = class P extends Plugin {
+        async onload() {
+          if (Platform.isDesktop) { require("fs"); }
+          this.flags = [Platform.isDesktop, new TFile() instanceof TFile];
+          this.saveData(this.flags);
+        }
+      };`;
+    const store = new MemoryDataStore();
+    const r = await new PluginHost(store).load({ id: "p", name: "P" }, src);
+    expect(r.loaded).toBe(true);
+    expect(r.unsupportedModules).toEqual([]);
+    expect(store.get("p")).toEqual([false, true]);
+  });
+
+  it("workspace.updateOptions asks the host to re-read extensions", async () => {
+    const src = `
+      const { Plugin } = require("obsidian");
+      module.exports = class P extends Plugin { onload() { this.app.workspace.updateOptions(); } };`;
+    const host = new PluginHost();
+    let changes = 0;
+    host.onChange = () => changes++;
+    await host.load({ id: "p", name: "P" }, src);
+    expect(changes).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps editorCheckCallback commands", async () => {
+    const src = `
+      const { Plugin } = require("obsidian");
+      module.exports = class P extends Plugin {
+        onload() { this.addCommand({ id: "c", name: "C", editorCheckCallback: (checking) => !checking }); }
+      };`;
+    const host = new PluginHost();
+    await host.load({ id: "p", name: "P" }, src);
+    expect(host.commands()[0].editorCheckCallback!(false, null, null)).toBe(true);
+  });
+});
