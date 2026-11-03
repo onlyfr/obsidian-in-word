@@ -1,4 +1,4 @@
-import { createI18nextShim, requireApiVersion } from "./compat";
+import { createI18nextShim, installPrototypeExtensions, requireApiVersion } from "./compat";
 import * as autocomplete from "@codemirror/autocomplete";
 import * as commands from "@codemirror/commands";
 import * as language from "@codemirror/language";
@@ -284,6 +284,8 @@ export class PluginHost {
       TFile: class {},
       TFolder: class {},
       PluginSettingTab: class {},
+      SettingTab: class {},
+      AbstractInputSuggest: class {},
       Modal: class {},
       Setting: class {
         constructor() {
@@ -329,6 +331,10 @@ export class PluginHost {
     this.commandsById.set(manifest.id, []);
     try {
       // Obsidian provides window.i18next to plugins.
+      installPrototypeExtensions();
+      // Obsidian's multi-window globals.
+      if (!(window as any).activeDocument) (window as any).activeDocument = document;
+      if (!(window as any).activeWindow) (window as any).activeWindow = window;
       if (!(window as any).i18next) (window as any).i18next = createI18nextShim();
       const { obsidian, appShim } = this.makeObsidian(report, manifest);
       const req = (name: string) => {

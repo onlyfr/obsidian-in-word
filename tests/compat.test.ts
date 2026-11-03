@@ -33,3 +33,23 @@ describe("plugin using window.i18next and requireApiVersion", () => {
     expect(host.commands()[0].name).toBe("n!");
   });
 });
+
+describe("Obsidian globals", () => {
+  it("activeDocument / activeWindow exist for plugins", async () => {
+    const host = new PluginHost();
+    const r = await host.load({ id: "g", name: "G" } as any, `module.exports = class extends require("obsidian").Plugin { onload() { if (activeDocument !== document || activeWindow !== window) throw new Error("bad"); } };`);
+    expect(r.error).toBeUndefined();
+    expect(r.loaded).toBe(true);
+  });
+});
+
+describe("prototype extensions", () => {
+  it("String#contains / Array#contains exist after loading a plugin, and are not enumerable", async () => {
+    const host = new PluginHost();
+    await host.load({ id: "p", name: "P" } as any, `module.exports = class extends require("obsidian").Plugin { onload() {} };`);
+    expect(("abc" as any).contains("b")).toBe(true);
+    expect(([1, 2] as any).contains(2)).toBe(true);
+    expect(([1, 2, 3] as any).last()).toBe(3);
+    expect(Object.keys([1])).toEqual(["0"]);
+  });
+});

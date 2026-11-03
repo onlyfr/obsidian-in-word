@@ -37,3 +37,32 @@ export function createI18nextShim() {
   instance.createInstance = () => ({ ...instance });
   return instance;
 }
+
+/**
+ * Obsidian extends built-in prototypes (`String#contains`, `Array#first`, ...) and plugins rely on them.
+ * Installed once, non-enumerable, and only where missing.
+ */
+export function installPrototypeExtensions(): void {
+  const def = (proto: object, name: string, fn: (...a: any[]) => unknown) => {
+    if (!(name in proto)) Object.defineProperty(proto, name, { value: fn, configurable: true, writable: true, enumerable: false });
+  };
+  def(String.prototype, "contains", function (this: string, s: string) {
+    return this.includes(s);
+  });
+  def(Array.prototype, "contains", function (this: unknown[], x: unknown) {
+    return this.includes(x);
+  });
+  def(Array.prototype, "first", function (this: unknown[]) {
+    return this[0];
+  });
+  def(Array.prototype, "last", function (this: unknown[]) {
+    return this[this.length - 1];
+  });
+  def(Array.prototype, "unique", function (this: unknown[]) {
+    return [...new Set(this)];
+  });
+  def(Array.prototype, "remove", function (this: unknown[], x: unknown) {
+    const i = this.indexOf(x);
+    if (i >= 0) this.splice(i, 1);
+  });
+}
