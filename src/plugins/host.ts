@@ -1,3 +1,4 @@
+import { installObsidianDom } from "./dom";
 import { createI18nextShim, installPrototypeExtensions, requireApiVersion } from "./compat";
 import * as autocomplete from "@codemirror/autocomplete";
 import * as commands from "@codemirror/commands";
@@ -9,7 +10,7 @@ import * as view from "@codemirror/view";
 import * as lezerCommon from "@lezer/common";
 import * as lezerHighlight from "@lezer/highlight";
 import * as lezerLr from "@lezer/lr";
-import type { Extension } from "@codemirror/state";
+import { StateField, type Extension } from "@codemirror/state";
 
 export interface PluginManifest {
   id: string;
@@ -108,6 +109,21 @@ export class PluginHost {
   ) {}
 
   /** All editor extensions registered by loaded plugins, to feed a CM6 Compartment. */
+  /**
+   * Obsidian-provided state fields plugins read through `obsidian.editorLivePreviewField` / `editorInfoField`.
+   * Source mode (no live preview); the info object points at the task pane editor and has no file.
+   */
+  readonly livePreviewField = StateField.define<boolean>({ create: () => false, update: (v) => v });
+  readonly infoField = StateField.define<unknown>({
+    create: () => ({ app: undefined, file: null, editor: this.activeView?.editor ?? null, view: this.activeView, hoverPopover: null }),
+    update: (v) => v,
+  });
+
+  /** The two Obsidian state fields; must be part of the same editor state as the plugins' extensions. */
+  stateFields(): Extension[] {
+    return this.extensionsById.size ? [this.livePreviewField, this.infoField] : [];
+  }
+
   extensions(): Extension[] {
     return [...this.extensionsById.values()].flat();
   }
@@ -300,6 +316,8 @@ export class PluginHost {
         }) as T;
       },
       requireApiVersion,
+      editorLivePreviewField: host.livePreviewField,
+      editorInfoField: host.infoField,
       apiVersion: "1.8.0",
       normalizePath: (p: string) => p.replace(/\\/g, "/").replace(/\/+/g, "/"),
     };
@@ -332,6 +350,7 @@ export class PluginHost {
     try {
       // Obsidian provides window.i18next to plugins.
       installPrototypeExtensions();
+      installObsidianDom();
       // Obsidian's multi-window globals.
       if (!(window as any).activeDocument) (window as any).activeDocument = document;
       if (!(window as any).activeWindow) (window as any).activeWindow = window;

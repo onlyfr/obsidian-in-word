@@ -26,7 +26,7 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
 
   const reconfigure = () => {
     const bindings = host.hotkeys().map((h) => ({ key: h.key, run: () => host.runCommand(h.commandId) }));
-    view.dispatch({ effects: compartment.reconfigure([...host.extensions(), keymap.of(bindings)]) });
+    view.dispatch({ effects: compartment.reconfigure([...host.stateFields(), ...host.extensions(), keymap.of(bindings)]) });
   };
 
   const renderReport = (r: CompatReport | undefined): HTMLElement => {

@@ -53,3 +53,34 @@ describe("prototype extensions", () => {
     expect(Object.keys([1])).toEqual(["0"]);
   });
 });
+
+describe("Obsidian DOM helpers and state fields", () => {
+  it("createEl / createDiv / empty / addClass work as in Obsidian", async () => {
+    const host = new PluginHost();
+    await host.load({ id: "d", name: "D" } as any, `module.exports = class extends require("obsidian").Plugin { onload() {} };`);
+    const div = (globalThis as any).createDiv({ cls: "a b", text: "hi", attr: { "data-x": "1" } });
+    expect(div.className).toBe("a b");
+    expect(div.textContent).toBe("hi");
+    expect(div.getAttribute("data-x")).toBe("1");
+    const span = (div as any).createSpan("c");
+    expect(span.parentElement).toBe(div);
+    (div as any).addClass("z");
+    expect((div as any).hasClass("z")).toBe(true);
+    (div as any).empty();
+    expect(div.childNodes.length).toBe(0);
+    expect((globalThis as any).createEl("button", { text: "x" }).tagName).toBe("BUTTON");
+  });
+
+  it("editorLivePreviewField / editorInfoField are real state fields provided by the host", async () => {
+    const { EditorState } = await import("@codemirror/state");
+    const host = new PluginHost();
+    const src = `const o = require("obsidian"); module.exports = class extends o.Plugin { onload() {
+      this.registerEditorExtension([]); window.__f = [o.editorLivePreviewField, o.editorInfoField]; } };`;
+    const r = await host.load({ id: "f", name: "F" } as any, src);
+    expect(r.loaded).toBe(true);
+    const [live, info] = (window as any).__f;
+    const st = EditorState.create({ doc: "x", extensions: [...host.stateFields(), ...host.extensions()] });
+    expect(st.field(live)).toBe(false);
+    expect((st.field(info) as any).file).toBeNull();
+  });
+});
