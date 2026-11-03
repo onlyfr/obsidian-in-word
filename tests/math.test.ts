@@ -46,7 +46,7 @@ const CORPUS: [string, string][] = [
   [r`\sin^2 x`, r`\sin^2 x`],
   [r`\sin{x+y}`, r`\sin{x+y}`],
   [r`\ln\left(x\right)`, r`\ln \left( x \right)`],
-  [r`\lim_{x\to 0} \frac{\sin x}{x}`, r`\lim_{x\to 0}{\frac{\sin x}{x}}`],
+  [r`\lim_{x\to 0} \frac{\sin x}{x}`, r`\lim_{x\to 0} \frac{\sin x}{x}`],
   [r`\max_{i} x_i`, r`\max_i{x_i}`],
   [r`\operatorname{rank} A`, r`\operatorname{rank} A`],
   [r`\text{if } x>0`, r`\text{if }x>0`],

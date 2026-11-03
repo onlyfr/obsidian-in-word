@@ -4,6 +4,13 @@ export interface SidecarEntry {
   html: string;
   /** Lossless OOXML of the block (floating objects), possibly compressed by the caller. Used instead of `html`. */
   ooxml?: string;
+  /** kind "math": the equation's LaTeX and the original OMML it was read from (restored verbatim if unchanged). */
+  latex?: string;
+  omml?: string;
+  /** kind "math": further OMML variants that read as the same LaTeX (consumed in order on apply). */
+  alts?: string[];
+  /** kind "equation": number of equations inside the opaque paragraph. */
+  count?: number;
 }
 
 export interface Sidecar {
