@@ -1,5 +1,7 @@
 import MarkdownIt from "markdown-it";
 import TurndownService from "turndown";
+import { PLACEHOLDER_SPLIT_RE, protectOpaque, tokensToPlaceholders } from "./blocks";
+import { MemorySidecar, type Sidecar } from "./sidecar";
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
 
@@ -48,13 +50,42 @@ export function cleanWordHtml(html: string): string {
     .replace(/<\/?(?:span|font)\b[^>]*>/gi, (tag) => (/<span[^>]*mso-/i.test(tag) ? "" : tag));
 }
 
-/** HTML from Word's getHtml -> Obsidian-flavored markdown. */
-export function htmlToMarkdown(html: string): string {
-  const out = td.turndown(cleanWordHtml(html));
+/**
+ * HTML from Word's getHtml -> Obsidian-flavored markdown.
+ * Word-only objects (tables, images, tracked changes, ...) become `<!-- word:obj ... -->`
+ * placeholders; their original HTML is stored in `sidecar`.
+ */
+export function htmlToMarkdown(html: string, sidecar: Sidecar = new MemorySidecar()): string {
+  const out = tokensToPlaceholders(td.turndown(protectOpaque(cleanWordHtml(html), sidecar)));
   return out
     .replace(/^(\s*)-   /gm, "$1- ") // turndown pads list items to 4 columns
     .replace(/^> \*\*\\\[!(\w+)\\\]\s*(.*?)\*\*\n>[ \t]*\n/gm, (_m, type: string, title: string) =>
       `> [!${type}]${title ? " " + title : ""}\n`,
     )
     .trimEnd();
+}
+
+export interface RenderResult {
+  html: string;
+  /** Placeholder ids that were not found in the sidecar (object deleted or document mismatch). */
+  missing: string[];
+}
+
+/** Markdown (with placeholders) -> HTML for Word, restoring Word-only objects from the sidecar. */
+export function renderWithSidecar(src: string, sidecar: Sidecar): RenderResult {
+  const parts = src.split(PLACEHOLDER_SPLIT_RE); // [text, id, kind, text, id, kind, ...]
+  const missing: string[] = [];
+  let html = "";
+  for (let i = 0; i < parts.length; i += 3) {
+    html += markdownToHtml(parts[i]);
+    const id = parts[i + 1];
+    if (id === undefined) continue;
+    const entry = sidecar.get(id);
+    if (entry) html += entry.html;
+    else {
+      missing.push(id);
+      html += `<p>[missing Word object ${id}]</p>`;
+    }
+  }
+  return { html, missing };
 }

@@ -37,6 +37,9 @@ Office.onReady((info) => {
   document.getElementById("load")!.onclick = () =>
     run("불러오기", async () => setDoc(await readSelectionAsMarkdown()));
   document.getElementById("apply")!.onclick = () =>
-    run("적용", () => replaceSelectionWithMarkdown(view.state.doc.toString()));
+    run("적용", async () => {
+      const { missing } = await replaceSelectionWithMarkdown(view.state.doc.toString());
+      if (missing.length) throw new Error(`복원할 수 없는 Word 객체: ${missing.join(", ")}`);
+    });
   setStatus("Word에서 영역을 선택하고 '선택 영역 → 마크다운' 을 누르세요.");
 });
