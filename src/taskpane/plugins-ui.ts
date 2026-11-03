@@ -1,7 +1,7 @@
 import type { Compartment } from "@codemirror/state";
 import { keymap, type EditorView } from "@codemirror/view";
 import { ObsidianEditor } from "../plugins/editor";
-import { MarkdownView, PluginHost, type CompatReport, type PluginManifest } from "../plugins/host";
+import { MarkdownView, PluginHost, type CompatReport, type PluginManifest, type SettingTabLike } from "../plugins/host";
 import { askConfirm } from "./confirm";
 import { LocalDataStore, PluginLibrary, type StoredPlugin } from "../plugins/storage";
 
@@ -23,6 +23,72 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
   const list = $("plugin-list");
   const select = $<HTMLSelectElement>("plugin-commands");
   let plugins: StoredPlugin[] = [];
+
+  // --- settings panel (PluginSettingTab) -------------------------------------------------------------------------
+  const panel = $("plugin-settings");
+  const main = $("plugin-main");
+  let open: { id: string; tab: SettingTabLike } | null = null;
+
+  const closeSettings = (focusId?: string) => {
+    if (!open) return;
+    const { id, tab } = open;
+    open = null;
+    try {
+      tab.hide();
+    } catch (e) {
+      const r = host.reports.get(id);
+      if (r) host.reportError(r, e, "hide()");
+    }
+    tab.containerEl.remove();
+    panel.replaceChildren();
+    panel.hidden = true;
+    main.hidden = false;
+    if (focusId) document.getElementById(focusId)?.focus();
+  };
+
+  const openSettings = (id: string, index = 0) => {
+    const tabs = host.settingTabs(id);
+    const tab = tabs[index];
+    if (!tab) return;
+    if (open) closeSettings();
+    open = { id, tab };
+    const manifest = plugins.find((p) => p.manifest.id === id)?.manifest;
+    const bar = el("div", "", "settings-bar");
+    const back = el("button", "← 목록");
+    back.id = "settings-back";
+    back.onclick = () => closeSettings(`plugin-settings-btn-${id}`);
+    const title = el("strong", `${manifest?.name ?? id} 설정`);
+    title.setAttribute("role", "heading");
+    bar.append(back, title);
+    if (tabs.length > 1) {
+      const sel = el("select");
+      sel.setAttribute("aria-label", "설정 탭");
+      tabs.forEach((t, i) => sel.append(Object.assign(document.createElement("option"), { value: String(i), textContent: t.name || `탭 ${i + 1}` })));
+      sel.value = String(index);
+      sel.onchange = () => openSettings(id, Number(sel.value));
+      bar.append(sel);
+    }
+    const body = el("div", "", "settings-body");
+    body.append(tab.containerEl);
+    panel.replaceChildren(bar, body);
+    main.hidden = true;
+    panel.hidden = false;
+    try {
+      tab.display();
+    } catch (e) {
+      body.append(el("div", `설정 화면을 그릴 수 없습니다: ${(e as Error)?.message ?? e}`, "setting-error"));
+      const r = host.reports.get(id);
+      if (r) host.reportError(r, e, "display()");
+    }
+    back.focus();
+  };
+  host.onOpenSettings = (id) => {
+    const i = plugins.findIndex((p) => p.manifest.id === id && p.enabled);
+    if (i >= 0) {
+      ($("plugins") as HTMLDetailsElement).open = true;
+      openSettings(id);
+    }
+  };
 
   const reconfigure = () => {
     const bindings = host.hotkeys().map((h) => ({ key: h.key, run: () => host.runCommand(h.commandId) }));
@@ -51,18 +117,26 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
         const toggle = el("button", p.enabled ? "끄기" : "켜기");
         toggle.onclick = async () => {
           p.enabled = !p.enabled;
+          if (open?.id === p.manifest.id) closeSettings();
           await library.save(p);
           p.enabled ? await host.load(p.manifest, p.mainJs, p.stylesCss) : host.unload(p.manifest.id);
           render();
         };
         const del = el("button", "삭제");
         del.onclick = async () => {
+          if (open?.id === p.manifest.id) closeSettings();
           host.unload(p.manifest.id);
           await library.remove(p.manifest.id);
           plugins = plugins.filter((x) => x !== p);
           render();
         };
         head.append(toggle, del);
+        if (p.enabled && host.settingTabs(p.manifest.id).length) {
+          const set = el("button", "설정");
+          set.id = `plugin-settings-btn-${p.manifest.id}`;
+          set.onclick = () => openSettings(p.manifest.id);
+          head.prepend(set);
+        }
         row.append(head, renderReport(host.reports.get(p.manifest.id), p.enabled));
         return row;
       }),
@@ -71,6 +145,7 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
   };
 
   host.onChange = () => {
+    if (open && !host.settingTabs(open.id).includes(open.tab)) closeSettings();
     reconfigure();
     render();
   };
