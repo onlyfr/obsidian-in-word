@@ -59,6 +59,7 @@ export function htmlToMarkdown(html: string, sidecar: Sidecar = new MemorySideca
   const out = tokensToPlaceholders(td.turndown(protectOpaque(cleanWordHtml(html), sidecar)));
   return out
     .replace(/^(\s*)-   /gm, "$1- ") // turndown pads list items to 4 columns
+    .replace(/\\\[\\\[(.+?)\\\]\\\]/g, "[[$1]]") // turndown escapes the brackets of plain-text [[wikilinks]]
     .replace(/^> \*\*\\\[!(\w+)\\\]\s*(.*?)\*\*\n>[ \t]*\n/gm, (_m, type: string, title: string) =>
       `> [!${type}]${title ? " " + title : ""}\n`,
     )
