@@ -51,3 +51,31 @@ Not available: MathJax rendering, live-preview conceal, vim integration, files/v
 - Concealment is gated by the plugin's own `concealEnabled` setting (default off; command "Toggle conceal"). It needed
   `debounce()` to return a Debouncer with `cancel()`/`run()`; with that, `\alpha + \beta \leq \infty` conceals to
   `α + β ≤ ∞` and reveals near the cursor, in the real Word task pane.
+
+## Settings tabs (`PluginSettingTab` / `Setting`)
+
+- `Plugin.addSettingTab(tab)` registers any number of tabs (none, several, the same tab twice are fine). Each plugin row
+  with tabs gets a **설정** button that opens the tab in an in-pane panel (`← 목록` returns, focus goes back to the
+  button; `hide()` is called when leaving, on 끄기/삭제, or when the plugin removes the tab). `display()` runs when the panel opens and whenever the plugin calls it again to re-render. A throwing `display()`/`hide()` shows an error
+  line in the panel and a warning in the compat report. `app.setting.openTabById(id)` opens the panel for that plugin.
+- `Setting`: `setName`, `setDesc` (string or DocumentFragment), `setClass`, `setTooltip`, `setHeading`, `setDisabled`,
+  `then`, `clear`, `settingEl/infoEl/nameEl/descEl/controlEl`, `components`, and `addToggle`, `addText`, `addTextArea`,
+  `addDropdown` (`addOption`/`addOptions`), `addSlider` (`setLimits`, `setDynamicTooltip`), `addButton`
+  (`setButtonText/setCta/setWarning/onClick`), `addExtraButton` (icons are text glyphs), `addColorPicker`, `addSearch`,
+  `addMomentFormat` (without `window.moment` the sample shows the format string), `addProgressBar`. Components have the
+  chainable Obsidian API (`getValue/setValue/onChange/setPlaceholder/setDisabled/setTooltip`, `inputEl`, ...). The name
+  labels (`aria-labelledby`) and the description describes (`aria-describedby`) each control.
+- Values flow through the plugin's own `saveData`; the host only supplies controls and callbacks. Exceptions and rejected
+  promises from handlers (`onChange`, `onClick`, the `add*` callbacks) are reported via the status line and the plugin's
+  compat report warnings (max 8), never swallowed.
+- Safety: all strings use `textContent`. DocumentFragments (and `sanitizeHTMLToDom`) are reduced to formatting tags;
+  links keep only http(s) `href` and get `target=_blank rel="noopener noreferrer"`; scripts, event handlers, images,
+  iframes and unknown attributes are dropped. (A plugin that writes `descEl.innerHTML` itself is running its own code
+  anyway; only data going through the Setting API is sanitized.)
+- Unknown `addXxx` controls render the row label plus "미지원 컨트롤 (addXxx)"; unknown methods on `Setting` and on
+  components are no-ops that keep chaining and are listed (e.g. `Setting.addXxx`, `Setting.TextComponent.foo`) under
+  "미지원 API". Raw-DOM tabs (`containerEl.createEl(...)`) and CodeMirror editors created inside the tab work.
+- Also added for real plugins: `Component.load/addChild/removeChild`, an i18next stand-in with resource bundles, nested
+  keys and interpolation (`addResourceBundle`, `getFixedT`), `sanitizeHTMLToDom`.
+- Verified in real Word with Latex Suite 1.14.1 (68 setting rows, 9 sections, 4 embedded CM6 editors, no degraded
+  rows): toggle, dropdown and the snippet editor persist across a pane reload and take effect (a new snippet expands).

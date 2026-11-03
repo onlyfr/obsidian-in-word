@@ -1,5 +1,5 @@
 import { mathRenderer } from "./math";
-import { createSettingsApi, iconGlyph } from "./settings";
+import { createSettingsApi, iconGlyph, sanitizeHTMLToDom } from "./settings";
 import { installObsidianDom } from "./dom";
 import { createI18nextShim, installPrototypeExtensions, requireApiVersion } from "./compat";
 import * as autocomplete from "@codemirror/autocomplete";
@@ -410,6 +410,7 @@ export class PluginHost {
       AbstractInputSuggest: class {},
       Modal: class {},
       debounce,
+      sanitizeHTMLToDom,
       requireApiVersion,
       // Math: Temml (lazy chunk) renders LaTeX to MathML; falls back to the source text if it cannot be loaded.
       loadMathJax: async () => {

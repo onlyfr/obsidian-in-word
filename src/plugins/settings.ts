@@ -60,6 +60,12 @@ export function sanitizeFragment(node: Node): DocumentFragment {
   return out;
 }
 
+/** Obsidian's `sanitizeHTMLToDom(html)`: an inert parse, reduced to harmless formatting and http(s) links. */
+export function sanitizeHTMLToDom(html: string): DocumentFragment {
+  const doc = new DOMParser().parseFromString(`<body>${String(html ?? "")}</body>`, "text/html");
+  return sanitizeFragment(doc.body);
+}
+
 const ICONS: Record<string, string> = {
   reset: "↺", "rotate-ccw": "↺", trash: "🗑", "trash-2": "🗑", settings: "⚙", plus: "+", x: "✕", cross: "✕", copy: "⧉",
   check: "✓", pencil: "✎", edit: "✎", search: "⌕", "chevron-down": "▾", "chevron-up": "▴", "arrow-up": "↑",
@@ -68,7 +74,7 @@ const ICONS: Record<string, string> = {
 
 /** Obsidian icon name -> a text glyph (there is no icon font in the task pane). */
 export function iconGlyph(name: string): string {
-  return ICONS[name] ?? name.slice(0, 1).toUpperCase();
+  return ICONS[name] ?? "•";
 }
 
 let uid = 0;

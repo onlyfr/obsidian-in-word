@@ -141,6 +141,7 @@ describe("Setting builder", () => {
     extra.click();
     expect(clicks).toBe(2);
     expect(extra.textContent).toBe(iconGlyph("reset"));
+    expect(iconGlyph("some-unknown-icon")).toBe("•");
     expect(extra.getAttribute("aria-label")).toBe("Reset");
   });
 
@@ -405,3 +406,19 @@ describe("settings tabs of synthetic plugins", () => {
 });
 
 void Compartment; void EditorState; void EditorView;
+
+describe("sanitizeHTMLToDom (Obsidian API)", () => {
+  it("returns a fragment with formatting and safe links only", async () => {
+    const { sanitizeHTMLToDom } = await import("../src/plugins/settings");
+    const f = sanitizeHTMLToDom(`<b>x</b> <a href="javascript:1" onclick="1">bad</a> <a href="https://e.example/">ok</a><script>1</script><img src=x onerror=1>`);
+    const d = document.createElement("div");
+    d.append(f);
+    expect(d.innerHTML).toBe('<b>x</b> <a>bad</a> <a href="https://e.example/" target="_blank" rel="noopener noreferrer">ok</a>');
+  });
+  it("is exported to plugins without being reported as unsupported", async () => {
+    const host = new PluginHost();
+    const r = await host.load({ id: "z", name: "z" } as any, `const o = require("obsidian"); module.exports = class extends o.Plugin { onload() { window.__f = o.sanitizeHTMLToDom("<i>a</i>"); } };`);
+    expect(r.unsupportedApis).toEqual([]);
+    expect((window as any).__f.firstChild.localName).toBe("i");
+  });
+});
