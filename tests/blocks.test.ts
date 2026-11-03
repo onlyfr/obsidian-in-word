@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { htmlToMarkdown, renderWithSidecar } from "../src/convert/obsidian";
-import { MemorySidecar, sidecarFromXml, sidecarToXml } from "../src/convert/sidecar";
-import { hashId } from "../src/convert/blocks";
+import { htmlToMarkdown, renderWithSidecar, styleHintsFromParagraphs } from "../src/convert/obsidian";
+import { MemorySidecar, pruneSidecar, sidecarFromXml, sidecarToXml } from "../src/convert/sidecar";
+import { hashId, placeholderIds } from "../src/convert/blocks";
 
 const TABLE = '<table style="mso-yfti-tbllook:1"><tr><td colspan="2">merged</td></tr></table>';
 const wordHtml = `<html><body><p>before</p>${TABLE}<p>after</p></body></html>`;
@@ -109,5 +109,109 @@ describe("real Word getHtml quirks", () => {
   it("does not escape plain-text wikilinks", () => {
     const md = htmlToMarkdown("<html><body><p>See [[Some Note]] and [[Other|alias]].</p></body></html>");
     expect(md).toContain("See [[Some Note]] and [[Other|alias]].");
+  });
+});
+
+describe("paragraph styles", () => {
+  const word = `<html><head><style>
+    p.MsoNormal, li.MsoNormal {mso-style-name:"표준";}
+    p.a3, li.a3, div.a3 {mso-style-name:"본문 들여쓰기"; margin-left:20pt;}
+  </style></head><body>
+    <h1>Title</h1>
+    <p class=MsoNormal>plain</p>
+    <p class=a3>indented text</p>
+    <p class=MsoQuote>quoted</p>
+  </body></html>`;
+
+  it("emits a style marker only for non-default paragraph styles", () => {
+    const md = htmlToMarkdown(word);
+    expect(md).toContain("<!-- word:style class=a3 name=%EB%B3%B8%EB%AC%B8%20%EB%93%A4%EC%97%AC%EC%93%B0%EA%B8%B0 -->\nindented text");
+    expect(md).toContain("<!-- word:style class=MsoQuote name=MsoQuote -->\nquoted");
+    expect(md).not.toMatch(/word:style class=MsoNormal/);
+    expect(md).toContain("# Title");
+  });
+
+  it("restores the style class and mso-style-name on apply", () => {
+    const { html } = renderWithSidecar(htmlToMarkdown(word), new MemorySidecar());
+    expect(html).toContain('<p class="a3">indented text</p>');
+    expect(html).toContain('mso-style-name:"본문 들여쓰기"');
+    expect(html).toContain('<p class="MsoNormal">plain</p>');
+    expect(html).toContain('<p class="MsoQuote">quoted</p>');
+  });
+
+  it("a style marker does not leak to the following paragraph", () => {
+    const md = "<!-- word:style class=a3 name=X -->\nfirst\n\nsecond";
+    const { html } = renderWithSidecar(md, new MemorySidecar());
+    expect(html).toContain('<p class="a3">first</p>');
+    expect(html).toContain('<p class="MsoNormal">second</p>');
+  });
+
+  it("round-trips wikilinks as plain text", () => {
+    const md = htmlToMarkdown("<body><p>see [[Some Note]] and [[A|b]]</p></body>");
+    expect(md).toBe("see [[Some Note]] and [[A|b]]");
+    expect(htmlToMarkdown(renderWithSidecar(md, new MemorySidecar()).html)).toBe(md);
+  });
+});
+
+describe("stable ids and pruning", () => {
+  const img = (guid: string, pid: string) =>
+    `<html><body><div class=WordSection1><p id=${pid} class=MsoNormal><span><img width=80 height=40 id="그림 1" src="~WRS%7b${guid}%7d.files/image001.png"></span></p></div></body></html>`;
+
+  it("gives the same placeholder id to an image across loads (temp name and paragraph GUID change)", () => {
+    const a = htmlToMarkdown(img("EB93D778-BF5F-4583-B5D5-3183916D2A5E", "9C51EDAA-3C60-4DF5-9CFE-ADD27EEB0288"));
+    const b = htmlToMarkdown(img("11111111-2222-3333-4444-555555555555", "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"));
+    expect(a).toMatch(/kind=image/);
+    expect(a).toBe(b);
+  });
+
+  it("prunes sidecar entries that the applied markdown no longer references", () => {
+    const sc = new MemorySidecar();
+    sc.set("aaaaaaaa", { kind: "table", html: "<table></table>" });
+    sc.set("bbbbbbbb", { kind: "image", html: "<img>" });
+    const kept = pruneSidecar(sc, placeholderIds("x\n\n<!-- word:obj id=aaaaaaaa kind=table -->\n"));
+    expect([...kept.entries()].map(([id]) => id)).toEqual(["aaaaaaaa"]);
+  });
+});
+
+describe("paragraph style round trip", () => {
+  it("collects styled paragraphs for the Office.js fallback and omits junk style blocks for unnamed built-ins", () => {
+    const sc = new MemorySidecar();
+    const html = `<html><body><p class=MsoNormal>plain</p><p class=MsoQuote>quoted</p><p class=a>custom</p></body></html>`;
+    const md = htmlToMarkdown(html, sc, new Map([["MsoQuote", "인용"], ["a", "내 스타일"]]));
+    expect(md).toContain("word:style class=MsoQuote name=%EC%9D%B8%EC%9A%A9");
+    const { html: out, styled } = renderWithSidecar(md, sc);
+    expect(styled).toEqual([
+      { text: "quoted", style: "인용" },
+      { text: "custom", style: "내 스타일" },
+    ]);
+    expect(out).toContain('<p class="MsoNormal">plain</p>');
+  });
+
+  it("derives class -> style name hints from Office.js paragraphs by text", () => {
+    const hints = styleHintsFromParagraphs("<body><p class=MsoQuote>a  quote</p><p class=MsoNormal>x</p></body>", [
+      { text: "a quote", style: "인용" },
+      { text: "x", style: "표준" },
+    ]);
+    expect(hints.get("MsoQuote")).toBe("인용");
+  });
+});
+
+describe("image embedding", () => {
+  it("stores the real image bytes (data URI) in the sidecar and keeps the placeholder id stable", () => {
+    const html = (guid: string) =>
+      `<html><body><div class=WordSection1><p class=MsoNormal><span><img width=80 height=40 src="~WRS%7b${guid}%7d.files/image001.png"></span></p></div></body></html>`;
+    const sc = new MemorySidecar();
+    const md = htmlToMarkdown(html("AAAAAAAA-0000-0000-0000-000000000000"), sc, new Map(), ["iVBORw0KGgo="]);
+    const same = htmlToMarkdown(html("BBBBBBBB-0000-0000-0000-000000000000"), new MemorySidecar(), new Map(), ["iVBORw0KGgo="]);
+    expect(md).toBe(same);
+    const [, entry] = [...sc.entries()][0];
+    expect(entry.html).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+    expect(entry.html).not.toContain("~WRS");
+  });
+
+  it("leaves the original src when picture count does not match", () => {
+    const sc = new MemorySidecar();
+    htmlToMarkdown('<html><body><p><img src="~WRS%7bX%7d.files/a.png"></p></body></html>', sc, new Map(), ["a", "b"]);
+    expect([...sc.entries()][0][1].html).toContain("~WRS");
   });
 });
