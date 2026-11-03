@@ -446,8 +446,14 @@ export function buildTableOoxml(rawOriginal: string | null, model: TableModel, o
     }
   }
   let xml = ser.serializeToString(tbl);
+  // Some serializers rename prefixes (ns1:paraId); map them back by namespace URI.
+  const known: Record<string, string> = { [W]: "w", [W14]: "w14", "http://schemas.openxmlformats.org/officeDocument/2006/math": "m", "http://schemas.openxmlformats.org/officeDocument/2006/relationships": "r" };
+  for (const m of Array.from(xml.matchAll(/\sxmlns:(ns\d+)="([^"]*)"/g))) {
+    const prefix = known[m[2]];
+    if (prefix) xml = xml.replace(new RegExp(`\\b${m[1]}:`, "g"), prefix + ":");
+  }
   // the namespaces are declared by the insertion package
-  xml = xml.replace(/\sxmlns:(?:w|m|r|mc|w14)="[^"]*"/g, "");
+  xml = xml.replace(/\sxmlns:(?:w|m|r|mc|w14|ns\d+)="[^"]*"/g, "");
   return { xml };
 }
 

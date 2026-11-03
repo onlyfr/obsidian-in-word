@@ -216,7 +216,7 @@ function cellMarkdown(inlineHtml: string): string {
   return td
     .turndown(`<div>${inlineHtml}</div>`)
     .replace(/\\\[\\\[(.+?)\\\]\\\]/g, "[[$1]]") // turndown escapes the brackets of plain-text [[wikilinks]]
-    .replace(/(`[^`\n]*`|\$)/g, (m) => (m === "$" ? "\\$" : m)); // a literal $ must not read as math
+    .replace(/(`[^`\n]*`|\$|~~)/g, (m) => (m === "$" ? "\\$" : m === "~~" ? "\\~~" : m)); // a literal $ / ~~ must not read as math / strike
 }
 
 /**
@@ -238,14 +238,14 @@ function convertSimpleTables(
     return html;
   }
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
-  const tops: Element[] = [];
-  const walk = (parent: Element) => {
-    for (const el of Array.from(parent.children)) {
-      if (el.tagName === "DIV" && /^WordSection/i.test(el.className)) walk(el);
-      else if (el.tagName === "TABLE") tops.push(el);
-    }
+  // Every table that is not nested in another one pairs with a top-level table of the OOXML (document order); only
+  // the ones that are direct children of the body/section are converted (a table inside a list item or quote stays).
+  const tops = Array.from(doc.body.querySelectorAll("table")).filter((t) => !t.parentElement?.closest("table"));
+  const direct = (t: Element) => {
+    let p = t.parentElement;
+    while (p && p !== doc.body && p.tagName === "DIV" && /^WordSection/i.test(p.className)) p = p.parentElement;
+    return p === doc.body;
   };
-  walk(doc.body);
   if (report) report.total += tops.length;
   if (tops.length !== caps.length) {
     if (report) report.unpaired += tops.length;
@@ -257,6 +257,7 @@ function convertSimpleTables(
     report.reasons[reason] = (report.reasons[reason] ?? 0) + 1;
   };
   tops.forEach((el, i) => {
+    if (!direct(el)) return note("inside a list or quote");
     if (hasFloating(el)) return note("floating object");
     const a = analyzeHtmlTable(el, cellMarkdown);
     if (!a.simple) return note(a.reason);
