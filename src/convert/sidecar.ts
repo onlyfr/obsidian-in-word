@@ -1,0 +1,43 @@
+/** A Word-only object that has no markdown representation; kept verbatim so it survives md editing. */
+export interface SidecarEntry {
+  kind: string;
+  html: string;
+}
+
+export interface Sidecar {
+  get(id: string): SidecarEntry | undefined;
+  set(id: string, entry: SidecarEntry): void;
+  entries(): Iterable<[string, SidecarEntry]>;
+}
+
+export class MemorySidecar implements Sidecar {
+  private readonly map = new Map<string, SidecarEntry>();
+  get(id: string) {
+    return this.map.get(id);
+  }
+  set(id: string, entry: SidecarEntry) {
+    this.map.set(id, entry);
+  }
+  entries() {
+    return this.map.entries();
+  }
+}
+
+export const SIDECAR_NAMESPACE = "urn:obsidian-in-word:sidecar:v1";
+
+/**
+ * Serialize to a Custom XML Part payload. The JSON is URI-encoded so arbitrary HTML
+ * (including "]]>") can never break the XML.
+ */
+export function sidecarToXml(sidecar: Sidecar): string {
+  const json = JSON.stringify(Object.fromEntries(sidecar.entries()));
+  return `<sidecar xmlns="${SIDECAR_NAMESPACE}">${encodeURIComponent(json)}</sidecar>`;
+}
+
+export function sidecarFromXml(xml: string, into: Sidecar = new MemorySidecar()): Sidecar {
+  const m = /<sidecar\b[^>]*>([\s\S]*?)<\/sidecar>/.exec(xml);
+  if (!m) return into;
+  const data = JSON.parse(decodeURIComponent(m[1])) as Record<string, SidecarEntry>;
+  for (const [id, entry] of Object.entries(data)) into.set(id, entry);
+  return into;
+}

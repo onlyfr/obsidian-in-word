@@ -11,5 +11,5 @@ export default defineConfig({
   root: "src/taskpane",
   build: { outDir: "../../dist", emptyOutDir: true },
   server: { port: 3000, https },
-  test: { root: ".", include: ["tests/**/*.test.ts"] },
+  test: { root: ".", include: ["tests/**/*.test.ts"], environment: "jsdom" },
 });
