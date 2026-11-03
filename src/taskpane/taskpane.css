@@ -1,0 +1,7 @@
+:root { color-scheme: light dark; }
+body { margin: 0; font: 14px system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+header { display: flex; gap: 8px; padding: 8px; }
+button { flex: 1; padding: 6px 8px; cursor: pointer; }
+#editor { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid #8884; }
+.cm-editor { height: 100%; }
+#status { margin: 0; padding: 6px 8px; min-height: 1.4em; opacity: 0.8; }

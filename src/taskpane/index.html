@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>obsidian-in-word</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <link rel="stylesheet" href="./taskpane.css" />
+  </head>
+  <body>
+    <header>
+      <button id="load">선택 영역 → 마크다운</button>
+      <button id="apply">Word에 적용</button>
+    </header>
+    <div id="editor"></div>
+    <p id="status" role="status"></p>
+    <script type="module" src="./taskpane.ts"></script>
+  </body>
+</html>

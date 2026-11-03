@@ -1,0 +1,31 @@
+{
+  "name": "obsidian-in-word",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Unofficial Word add-in to edit Obsidian-flavored Markdown inside Word (PoC)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
+    "@types/node": "^26.6.6",
+    "@types/office-js": "^1.0.615",
+    "@types/turndown": "^5.0.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "markdown-it": "^15.0.3",
+    "turndown": "^7.2.4"
+  }
+}
