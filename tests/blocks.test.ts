@@ -209,9 +209,102 @@ describe("image embedding", () => {
     expect(entry.html).not.toContain("~WRS");
   });
 
-  it("leaves the original src when picture count does not match", () => {
+  it("never keeps the temp ~WRS src: unmatched and floating pictures get a blank placeholder", () => {
     const sc = new MemorySidecar();
-    htmlToMarkdown('<html><body><p><img src="~WRS%7bX%7d.files/a.png"></p></body></html>', sc, new Map(), ["a", "b"]);
-    expect([...sc.entries()][0][1].html).toContain("~WRS");
+    htmlToMarkdown(
+      '<html><body><p><img src="~WRS%7bX%7d.files/a.png" align=left><span>Anchor</span></p></body></html>',
+      sc,
+      new Map(),
+      [],
+    );
+    const html = [...sc.entries()][0][1].html;
+    expect(html).not.toContain("~WRS");
+    expect(html).toContain("data:image/png;base64,");
+    expect(html).toContain('alt="picture not preserved"');
+  });
+
+  it("pairs only non-floating pictures with the inline picture bytes", () => {
+    const sc = new MemorySidecar();
+    htmlToMarkdown(
+      '<html><body><p><img src="~WRS%7bX%7d.files/a.png" align=left><span>t</span></p><table><tr><td><img src="~WRS%7bX%7d.files/a.png"></td></tr></table></body></html>',
+      sc,
+      new Map(),
+      ["iVBORw0KGgo="],
+    );
+    const htmls = [...sc.entries()].map(([, e]) => e.html);
+    expect(htmls.some((h) => h.includes('src="data:image/png;base64,iVBORw0KGgo="'))).toBe(true);
+    expect(htmls.every((h) => !h.includes("~WRS"))).toBe(true);
+  });
+});
+
+describe("real Word list shapes (getHtml)", () => {
+  const num = (cls: string, ml: number, mark: string, t: string) =>
+    `<p class=${cls} style='margin-left:${ml}.0pt;text-indent:-18.0pt'><span lang=EN-US>${mark}<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span lang=EN-US>${t}</span></p>`;
+  const bul = (cls: string, ml: number, t: string) =>
+    `<p class=${cls} style='margin-left:${ml}.0pt;text-indent:-18.0pt'><span lang=EN-US style='font-family:Symbol'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp; </span></span><span lang=EN-US>${t}</span></p>`;
+  const wrap = (body: string) => `<html><body><div class=WordSection1>${body}</div></body></html>`;
+
+  it("keeps the start number of a numbered list and separates lists split by a paragraph", () => {
+    const md = htmlToMarkdown(
+      wrap(
+        num("MsoListNumberCxSpFirst", 44, "3.", "three") +
+          num("MsoListNumberCxSpLast", 44, "4.", "four") +
+          "<p class=MsoNormal>Between</p>" +
+          num("MsoListNumberCxSpFirst", 44, "1.", "alpha") +
+          num("MsoListNumberCxSpLast", 44, "2.", "beta"),
+      ),
+    );
+    const m = "<!-- word:style class=MsoListNumber name=MsoListNumber -->\n";
+    expect(md).toBe(`${m}3. three\n4. four\n\nBetween\n\n${m}1. alpha\n2. beta`);
+  });
+
+  it("produces indented markdown for mixed 3-level nesting (margin-left = level)", () => {
+    const md = htmlToMarkdown(
+      wrap(
+        num("MsoListParagraph", 18, "1.", "one") +
+          bul("MsoListParagraph", 36, "a") +
+          num("MsoListParagraph", 54, "1)", "x") +
+          num("MsoListParagraph", 54, "2)", "y") +
+          bul("MsoListParagraph", 36, "b") +
+          num("MsoListParagraph", 18, "2.", "two"),
+      ),
+    );
+    expect(md).toBe("1. one\n    - a\n        1. x\n        2. y\n    - b\n2. two");
+  });
+
+  it("renders nested markdown back to nested lists", () => {
+    const { html } = renderWithSidecar("1. one\n    - a\n        1. x\n2. two", new MemorySidecar());
+    expect(html.replace(/\s+/g, "").replace(/ class="MsoListParagraph"/g, "").replace(/liclass="MsoListParagraph"/g, "li")).toBe(
+      "<ol><li>one<ul><li>a<ol><li>x</li></ol></li></ul></li><li>two</li></ol>",
+    );
+  });
+});
+
+describe("list styles round trip", () => {
+  const li = (cls: string, mark: string, t: string, ml = 44) =>
+    `<p class=${cls} style='margin-left:${ml}.0pt;text-indent:-22.0pt'><span lang=EN-US>${mark}<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp; </span></span><span lang=EN-US>${t}</span></p>`;
+  const wrap = (b: string) => `<html><body><div class=WordSection1>${b}</div></body></html>`;
+
+  it("renders markdown lists with the List Paragraph class by default", () => {
+    const { html } = renderWithSidecar("- a\n- b", new MemorySidecar());
+    expect(html).toContain('<li class="MsoListParagraph">a</li>');
+  });
+
+  it("round-trips List Number / List Bullet through a marker, but not List Paragraph", () => {
+    const num = htmlToMarkdown(wrap(li("MsoListNumberCxSpFirst", "1.", "one") + li("MsoListNumberCxSpLast", "2.", "two")));
+    expect(num).toBe("<!-- word:style class=MsoListNumber name=MsoListNumber -->\n1. one\n2. two");
+    const { html } = renderWithSidecar(num, new MemorySidecar());
+    expect(html.split("\n").join("")).toContain('<ol><li class="MsoListNumber">one</li><li class="MsoListNumber">two</li></ol>');
+    const plain = htmlToMarkdown(wrap(li("MsoListParagraph", "1.", "one", 18)));
+    expect(plain).toBe("1. one");
+  });
+
+  it("applies the marker's class to nested items of that list only", () => {
+    const { html } = renderWithSidecar(
+      "<!-- word:style class=MsoListBullet name=MsoListBullet -->\n- a\n    - b\n- c",
+      new MemorySidecar(),
+    );
+    expect(html).toContain('<li class="MsoListBullet">a');
+    expect(html).toContain('<li class="MsoListBullet">b</li>');
   });
 });
