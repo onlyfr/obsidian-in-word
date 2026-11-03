@@ -1,3 +1,4 @@
+import { createI18nextShim, requireApiVersion } from "./compat";
 import * as autocomplete from "@codemirror/autocomplete";
 import * as commands from "@codemirror/commands";
 import * as language from "@codemirror/language";
@@ -296,6 +297,8 @@ export class PluginHost {
           h = setTimeout(() => fn(...a), ms);
         }) as T;
       },
+      requireApiVersion,
+      apiVersion: "1.8.0",
       normalizePath: (p: string) => p.replace(/\\/g, "/").replace(/\/+/g, "/"),
     };
     const obsidian = new Proxy(mod, {
@@ -325,6 +328,8 @@ export class PluginHost {
     this.extensionsById.set(manifest.id, []);
     this.commandsById.set(manifest.id, []);
     try {
+      // Obsidian provides window.i18next to plugins.
+      if (!(window as any).i18next) (window as any).i18next = createI18nextShim();
       const { obsidian, appShim } = this.makeObsidian(report, manifest);
       const req = (name: string) => {
         if (name === "obsidian") return obsidian;
