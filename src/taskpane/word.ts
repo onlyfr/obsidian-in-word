@@ -239,6 +239,10 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       if (idx < 0) throw new Error(`표 위치를 찾을 수 없습니다 (${t.marker})`);
       const tp = wrapPackage(t.ooxml, t.rels);
       ops.push(() => paras[idx].insertOoxml(tp, Word.InsertLocation.replace));
+      // insertOoxml leaves the marker paragraph behind as an empty paragraph after the table. Drop it when ordinary
+      // text follows (a table needs some paragraph after it, and two tables need one between them: those stay).
+      const next = paras[idx + 1];
+      if (next && !/^OWB(?:TBL|EQ|FLOAT)\d/.test(next.text.trim())) ops.push(() => next.getPrevious().delete());
     });
     // Equations: display ones replace their marker paragraph, inline ones replace the marker word.
     equations.forEach((q, n) => {
