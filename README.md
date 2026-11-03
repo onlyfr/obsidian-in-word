@@ -45,6 +45,9 @@ npm run build   # 타입체크 + 번들
 - 일반 문단은 Word의 Normal 스타일(`MsoNormal`)로 들어가고, 그 외 문단 스타일(인용, 사용자 정의 등)은 문단 앞의 `<!-- word:style class=… name=… -->` 한 줄로 보존됩니다.
 - `[[위키링크]]`는 하이퍼링크가 아니라 **글자 그대로** Word에 들어갑니다. 왕복해도 `[[ ]]`가 유지됩니다.
 
+### 커뮤니티 플러그인 호스트 (초기)
+`src/plugins/host.ts`는 Obsidian 플러그인의 `main.js`(CommonJS)를 불러와 에디터 확장(`registerEditorExtension`)과 명령(`addCommand`)을 수집합니다. `obsidian` 모듈은 최소한만 흉내 내며(Plugin, Notice, Platform 등), 지원하지 않는 API나 모듈은 오류 대신 **호환성 보고서**에 기록됩니다. 아직 작업창 UI에는 연결되어 있지 않고, 실제 Latex Suite 같은 플러그인과의 호환은 검증하지 않았습니다. 플러그인은 내려받은 코드를 그대로 실행하므로 신뢰하는 것만 사용하세요.
+
 ### 알려진 한계
 - 불투명 블록 안의 텍스트는 마크다운으로 편집할 수 없습니다 (이미지가 한 장이라도 들어 있는 문단 전체가 하나의 블록이 됩니다).
 - 객체 복원은 `getHtml`/`insertHtml` 기반이라 Word 고유 서식이 일부 손실될 수 있습니다 (추후 OOXML 기반으로 개선 예정).
