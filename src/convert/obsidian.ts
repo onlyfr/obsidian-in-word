@@ -195,6 +195,8 @@ export interface TableCapture {
   raw: string;
   /** gz-encoded `raw` (stored in the sidecar). */
   gz: string;
+  /** `<Relationship>` markup for the hyperlinks `raw` refers to (see tableRels). */
+  rels?: string;
 }
 
 export interface TableReport {
@@ -260,7 +262,7 @@ function convertSimpleTables(
     if (!a.simple) return note(a.reason);
     const id = tableId(caps[i].raw);
     const lines = modelToLines(a.model);
-    sidecar.set(id, { kind: "table", html: "", ooxml: caps[i].gz, md: lines.join("\n") });
+    sidecar.set(id, { kind: "table", html: "", ooxml: caps[i].gz, md: lines.join("\n"), rels: caps[i].rels });
     blocks.push(`${tableMarker(id)}\n${lines.join("\n")}`);
     const p = doc.createElement("p");
     p.textContent = `OWBTBL${blocks.length - 1}END`;
@@ -388,7 +390,7 @@ export interface RenderResult {
    * Markdown tables. `html` contains each `marker` as plain text alone in its paragraph; the caller replaces that
    * paragraph with `insertOoxml(wrapPackage(ooxml))` (the original table if it was not edited).
    */
-  tables: { marker: string; ooxml: string; edited: boolean }[];
+  tables: { marker: string; ooxml: string; rels?: string; edited: boolean }[];
   /** Tables that cannot be applied without losing text (ragged rows, broken markers): the apply refuses. */
   badTables: string[];
   /** Normalizations the user should hear about (e.g. short rows padded). */
@@ -415,7 +417,7 @@ function collectStyled(chunk: string, out: { text: string; style: string }[]): v
 function extractTables(
   src: string,
   sidecar: Sidecar,
-  sources: Map<string, string>,
+  sources: Map<string, { raw: string; rels?: string }>,
   tables: RenderResult["tables"],
   bad: string[],
   notes: string[],
@@ -437,14 +439,16 @@ function extractTables(
       continue;
     }
     const entry = b.id ? sidecar.get(b.id) : undefined;
-    const raw = entry?.kind === "table" ? sources.get(b.id!) : undefined;
+    const original = entry?.kind === "table" ? sources.get(b.id!) : undefined;
+    const raw = original?.raw;
     const origModel: TableModel | undefined = entry?.md ? findTableBlocks(entry.md)[0]?.model : undefined;
     if (b.id && !raw) notes.push("원본 표를 찾지 못해 새 표로 만들었습니다 (서식 없음)");
     const unchanged = !!raw && !!origModel && sameModel(origModel, b.model);
     if (b.padded) notes.push(`표의 짧은 행 ${b.padded}개를 빈 칸으로 채웠습니다`);
     const ooxml = unchanged ? raw! : buildTableOoxml(raw ?? null, b.model, origModel).xml;
+    const rels = original?.rels;
     const marker = `OWBTBL${tables.length}END`;
-    tables.push({ marker, ooxml, edited: !unchanged });
+    tables.push({ marker, ooxml, rels, edited: !unchanged });
     out += `\n\n${marker}\n\n`;
   }
   return out + src.slice(pos);
@@ -455,7 +459,7 @@ export function renderWithSidecar(
   src: string,
   sidecar: Sidecar,
   /** Un-gz'd original OOXML of `kind=table` sidecar entries, by id (the caller decompresses them). */
-  tableSources: Map<string, string> = new Map(),
+  tableSources: Map<string, { raw: string; rels?: string }> = new Map(),
 ): RenderResult {
   const parts = src.split(PLACEHOLDER_SPLIT_RE); // [text, id, kind, text, id, kind, ...]
   const missing: string[] = [];

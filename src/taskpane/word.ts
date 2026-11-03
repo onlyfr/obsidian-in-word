@@ -8,7 +8,7 @@ import {
   type TableReport,
 } from "../convert/obsidian";
 import { countEquations, equationPackage, mathIds, scanOoxml, wrapPackage } from "../convert/equations";
-import { TABLE_MARKER_RE, countTables, scanTables } from "../convert/tables";
+import { TABLE_MARKER_RE, countTables, scanTables, tableRels } from "../convert/tables";
 
 /** Sidecar ids of the markdown tables (`<!-- word:table id=... -->`). */
 const tableIds = (markdown: string) =>
@@ -130,7 +130,7 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     const report: FloatReport = { total: 0, preserved: 0 };
     const mathReport: MathReport = { total: 0, latex: 0, opaque: 0, unpaired: 0 };
     const tableReport: TableReport = { total: 0, simple: 0, opaque: 0, unpaired: 0, reasons: {} };
-    const tableCaps = await Promise.all(scanTables(selOoxml.value).map(async (raw) => ({ raw, gz: await gz(raw) })));
+    const tableCaps = await Promise.all(scanTables(selOoxml.value).map(async (raw) => ({ raw, gz: await gz(raw), rels: tableRels(raw, selOoxml.value) })));
     const markdown = htmlToMarkdown(
       html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport,
     );
@@ -168,10 +168,10 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
   return Word.run(async (context) => {
     const sidecar = await loadSidecar(context);
     // Original OOXML of the tables the markdown refers to (stored gz-compressed in the sidecar).
-    const tableSources = new Map<string, string>();
+    const tableSources = new Map<string, { raw: string; rels?: string }>();
     for (const id of tableIds(markdown)) {
       const e = sidecar.get(id);
-      if (e?.kind === "table" && e.ooxml) tableSources.set(id, await ungz(e.ooxml));
+      if (e?.kind === "table" && e.ooxml) tableSources.set(id, { raw: await ungz(e.ooxml), rels: e.rels });
     }
     const { html, missing, styled, floats, lost, equations, badMath, opaqueEquations, tables, badTables, tableNotes, opaqueTables } =
       renderWithSidecar(markdown, sidecar, tableSources);
@@ -237,7 +237,7 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
     tables.forEach((t) => {
       const idx = paras.findIndex((p) => p.text.trim() === t.marker);
       if (idx < 0) throw new Error(`표 위치를 찾을 수 없습니다 (${t.marker})`);
-      const tp = wrapPackage(t.ooxml);
+      const tp = wrapPackage(t.ooxml, t.rels);
       ops.push(() => paras[idx].insertOoxml(tp, Word.InsertLocation.replace));
     });
     // Equations: display ones replace their marker paragraph, inline ones replace the marker word.

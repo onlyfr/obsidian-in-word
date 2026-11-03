@@ -49,7 +49,23 @@ export const countTables = (ooxml: string) => scanTables(ooxml).length;
 
 /** Drop the per-call noise Word adds (paragraph ids, revision ids) so equal tables compare/hash equal. */
 export function normalizeIds(xml: string): string {
-  return xml.replace(/\sw14:(?:paraId|textId)="[^"]*"/g, "").replace(/\sw:rsid[A-Za-z]*="[^"]*"/g, "");
+  return xml
+    .replace(/<w:tblPrEx>[\s\S]*?<\/w:tblPrEx>/g, "") // redundant per-row exceptions: Word drops them when the table is inserted
+    .replace(/\sw14:(?:paraId|textId)="[^"]*"/g, "")
+    .replace(/\sw:rsid[A-Za-z]*="[^"]*"/g, "")
+    .replace(/\sr:id="[^"]*"/g, ""); // relationship ids differ per getOoxml call; the target is in `rels`
+}
+
+/** `<Relationship>` markup for the relationship ids a table refers to (hyperlinks), from the package's rels part. */
+export function tableRels(raw: string, ooxml: string): string {
+  const ids = new Set(Array.from(raw.matchAll(/\sr:id="([^"]+)"/g), (m) => m[1]));
+  if (!ids.size) return "";
+  const out: string[] = [];
+  for (const m of ooxml.matchAll(/<Relationship\b[^>]*\/>/g)) {
+    const id = /\sId="([^"]+)"/.exec(m[0])?.[1];
+    if (id && ids.has(id) && /\/hyperlink"/.test(m[0])) out.push(m[0]);
+  }
+  return out.join("");
 }
 
 export const tableId = (rawOoxml: string) => hashId("tbl:" + normalizeIds(rawOoxml));
