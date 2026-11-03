@@ -19,3 +19,33 @@ button { flex: 1; padding: 6px 8px; cursor: pointer; }
 .inline-confirm { margin: 6px 0; padding: 6px; border: 1px solid #c80; border-radius: 4px; }
 .inline-confirm p { margin: 0 0 6px; }
 .inline-confirm button { margin-right: 6px; flex: none; }
+
+/* Plugin settings panel (Obsidian PluginSettingTab / Setting) */
+[hidden] { display: none !important; }
+#plugin-settings button:focus-visible, #plugin-settings input:focus-visible, #plugin-settings select:focus-visible,
+#plugin-settings textarea:focus-visible, #plugins button:focus-visible { outline: 2px solid Highlight; outline-offset: 1px; }
+.settings-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+.settings-bar button { flex: none; }
+.settings-bar select { min-width: 0; max-width: 100%; }
+.setting-error { color: #c33; font-size: 12px; margin: 6px 0; }
+#plugin-settings .setting-item { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid #8883; }
+#plugin-settings .setting-item-info { flex: 1 1 140px; min-width: 0; }
+#plugin-settings .setting-item-name { font-weight: 600; overflow-wrap: anywhere; }
+#plugin-settings .setting-item-description { font-size: 12px; opacity: 0.75; overflow-wrap: anywhere; }
+#plugin-settings .setting-item-description a { color: LinkText; }
+#plugin-settings .setting-item-control { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; flex: 0 1 auto; max-width: 100%; }
+#plugin-settings .setting-item-heading { border-top: none; padding-top: 12px; }
+#plugin-settings .setting-item-heading .setting-item-name { font-size: 14px; }
+#plugin-settings .setting-item.is-disabled { opacity: 0.55; }
+#plugin-settings .setting-item-control > button, #plugin-settings .setting-item-control .clickable-icon { flex: none; padding: 2px 8px; }
+#plugin-settings .mod-cta { background: Highlight; color: HighlightText; border-color: transparent; }
+#plugin-settings .mod-warning { color: #c33; border-color: #c33; }
+#plugin-settings input[type="text"], #plugin-settings input[type="search"], #plugin-settings select, #plugin-settings textarea { min-width: 0; max-width: 100%; box-sizing: border-box; }
+#plugin-settings .setting-item-control textarea { width: 100%; min-height: 8em; font: 12px ui-monospace, Consolas, monospace; }
+#plugin-settings .setting-item-control:has(textarea) { flex: 1 1 100%; }
+#plugin-settings .slider { flex: 1 1 100px; min-width: 60px; }
+#plugin-settings .checkbox-container input { width: 1.2em; height: 1.2em; }
+#plugin-settings .setting-unsupported { font-size: 11px; opacity: 0.7; font-style: italic; }
+#plugin-settings .cm-editor { max-width: 100%; height: auto; min-height: 6em; max-height: 40vh; border: 1px solid #8884; }
+#plugin-settings .vertical-tab-content { overflow-wrap: anywhere; }
+#plugins:has(#plugin-settings:not([hidden])) { max-height: 85vh; }

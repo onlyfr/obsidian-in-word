@@ -17,12 +17,15 @@
     <details id="plugins">
       <summary>플러그인 (Obsidian 커뮤니티)</summary>
       <p class="warn">플러그인은 불러온 JS 코드를 이 작업창에서 그대로 실행합니다. 신뢰하는 것만 사용하세요. 작업창 에디터 안에서만 동작합니다.</p>
-      <input id="plugin-files" type="file" multiple accept=".js,.json,.css" />
-      <div id="plugin-list"></div>
-      <div class="cmd-row">
-        <select id="plugin-commands"></select>
-        <button id="plugin-run">실행</button>
+      <div id="plugin-main">
+        <input id="plugin-files" type="file" multiple accept=".js,.json,.css" />
+        <div id="plugin-list"></div>
+        <div class="cmd-row">
+          <select id="plugin-commands"></select>
+          <button id="plugin-run">실행</button>
+        </div>
       </div>
+      <div id="plugin-settings" hidden></div>
     </details>
     <script type="module" src="./taskpane.ts"></script>
   </body>

@@ -1,4 +1,5 @@
 import { mathRenderer } from "./math";
+import { createSettingsApi, iconGlyph } from "./settings";
 import { installObsidianDom } from "./dom";
 import { createI18nextShim, installPrototypeExtensions, requireApiVersion } from "./compat";
 import * as autocomplete from "@codemirror/autocomplete";
@@ -29,8 +30,18 @@ export interface CompatReport {
   unsupportedModules: string[];
   editorExtensions: number;
   commands: number;
+  /** Number of settings tabs the plugin registered. */
+  settingsTabs: number;
   /** Non-fatal degradations (e.g. math rendering fell back to plain text). */
   warnings: string[];
+}
+
+/** What the host needs from a `PluginSettingTab`. */
+export interface SettingTabLike {
+  containerEl: HTMLElement;
+  name?: string;
+  display(): void;
+  hide(): void;
 }
 
 export interface PluginCommand {
@@ -139,6 +150,9 @@ export class PluginHost {
   readonly reports = new Map<string, CompatReport>();
   private readonly extensionsById = new Map<string, Extension[]>();
   private readonly commandsById = new Map<string, PluginCommand[]>();
+  private readonly settingTabsById = new Map<string, SettingTabLike[]>();
+  /** Set by the task pane: open this plugin's settings panel (`app.setting.openTabById`). */
+  onOpenSettings: (pluginId: string) => void = () => {};
   private readonly instances = new Map<string, { unload(): void }>();
   onChange: () => void = () => {};
   /** The view that `workspace.getActiveViewOfType(MarkdownView)` returns (set by the task pane). */
@@ -197,6 +211,19 @@ export class PluginHost {
       this.notify(`${cmd.name}: ${(e as Error).message}`);
     }
     return false;
+  }
+
+  /** Settings tabs registered by a plugin (empty if none). */
+  settingTabs(id: string): SettingTabLike[] {
+    return this.settingTabsById.get(id) ?? [];
+  }
+
+  /** A plugin handler/display failed: tell the user and record it in the compat report (bounded). */
+  reportError(report: CompatReport, e: unknown, where: string) {
+    const msg = `${where}: ${(e as Error)?.message ?? String(e)}`;
+    this.notify(msg);
+    if (report.warnings.length < 8 && !report.warnings.includes(msg)) report.warnings.push(msg);
+    this.onChange();
   }
 
   /** Hotkeys declared by commands, as CodeMirror key strings (Mod = Ctrl/Cmd). */
@@ -262,7 +289,20 @@ export class PluginHost {
         report.commands++;
         return cmd;
       }
-      addSettingTab() {}
+      addSettingTab(tab: SettingTabLike) {
+        if (!tab || typeof tab.display !== "function") return;
+        const list = host.settingTabsById.get(manifest.id) ?? [];
+        if (!list.includes(tab)) list.push(tab);
+        host.settingTabsById.set(manifest.id, list);
+        report.settingsTabs = list.length;
+        host.onChange();
+      }
+      removeSettingTab(tab: SettingTabLike) {
+        const list = host.settingTabsById.get(manifest.id) ?? [];
+        host.settingTabsById.set(manifest.id, list.filter((t) => t !== tab));
+        report.settingsTabs = list.length - 1;
+        host.onChange();
+      }
       addRibbonIcon() {
         return document.createElement("div");
       }
@@ -316,10 +356,16 @@ export class PluginHost {
           { on: () => ({}), getAbstractFileByPath: () => null, getMarkdownFiles: () => [], config: {}, adapter: noop(use, "app.vault.adapter") } as Record<string, unknown>,
           { get: (t, k) => (k in t ? t[k as string] : (use(`app.vault.${String(k)}`), undefined)) },
         ),
+        setting: { open: () => {}, close: () => {}, openTabById: (id: string) => host.onOpenSettings(id), activeTab: null },
         metadataCache: { on: () => ({}), getFileCache: () => null },
       } as Record<string, unknown>,
       { get: (t, k) => (k in t ? t[k as string] : (typeof k === "string" ? use(`app.${k}`) : 0, (app as any)[k])) },
     );
+
+    const settingsApi = createSettingsApi({
+      unsupported: use,
+      onError: (e, where) => host.reportError(report, e, where),
+    });
 
     const mod: Record<string, unknown> = {
       __esModule: true,
@@ -340,15 +386,9 @@ export class PluginHost {
       TAbstractFile: class {},
       TFile: class {},
       TFolder: class {},
-      PluginSettingTab: class {},
-      SettingTab: class {},
+      ...settingsApi,
       AbstractInputSuggest: class {},
       Modal: class {},
-      Setting: class {
-        constructor() {
-          return new Proxy(this, { get: (t, k) => (k in t ? (t as any)[k] : () => t) });
-        }
-      },
       debounce,
       requireApiVersion,
       // Math: Temml (lazy chunk) renders LaTeX to MathML; falls back to the source text if it cannot be loaded.
@@ -361,7 +401,9 @@ export class PluginHost {
       renderMath: (source: string, display: boolean) => mathRenderer.render(String(source), !!display),
       finishRenderMath: async () => {},
       addIcon: () => {},
-      setIcon: () => {},
+      setIcon: (el: HTMLElement, name: string) => {
+        if (el) el.textContent = iconGlyph(name);
+      },
       editorLivePreviewField: host.livePreviewField,
       editorInfoField: host.infoField,
       apiVersion: "1.8.0",
@@ -386,6 +428,7 @@ export class PluginHost {
       unsupportedApis: [],
       unsupportedModules: [],
       warnings: [],
+      settingsTabs: 0,
       editorExtensions: 0,
       commands: 0,
     };
@@ -394,6 +437,7 @@ export class PluginHost {
     this.reports.set(manifest.id, report);
     this.extensionsById.set(manifest.id, []);
     this.commandsById.set(manifest.id, []);
+    this.settingTabsById.set(manifest.id, []);
     try {
       // Obsidian provides window.i18next to plugins.
       installPrototypeExtensions();
@@ -427,6 +471,7 @@ export class PluginHost {
       report.error = (e as Error).message;
       this.extensionsById.delete(manifest.id);
       this.commandsById.delete(manifest.id);
+      this.settingTabsById.delete(manifest.id);
     }
     this.onChange();
     return report;
@@ -437,6 +482,7 @@ export class PluginHost {
     this.instances.delete(id);
     this.extensionsById.delete(id);
     this.commandsById.delete(id);
+    this.settingTabsById.delete(id);
     document.querySelectorAll(`style[data-plugin="${CSS.escape(id)}"]`).forEach((n) => n.remove());
     this.onChange();
   }
