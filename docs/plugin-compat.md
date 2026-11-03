@@ -29,3 +29,25 @@ a minimal `window.i18next`, `activeDocument`/`activeWindow`, Obsidian's prototyp
 DOM helpers (`createEl`, `createDiv`, `el.addClass`, `el.empty`, `node.win`, ...), the `editorLivePreviewField`
 (always source mode) and `editorInfoField` state fields, `renderMath`/`loadMathJax` fallbacks (LaTeX source as text).
 Not available: MathJax rendering, live-preview conceal, vim integration, files/vault access.
+
+## Math rendering (`loadMathJax` / `renderMath` / `finishRenderMath`)
+
+- `renderMath(source, display)` returns `span.math.math-inline` / `div.math.math-block` (+ `is-loaded`) containing native
+  MathML produced by [Temml](https://temml.org) (MIT). `\class{name}{...}` (used by plugins to mark the cursor or a
+  highlight) is the only trusted command; everything else keeps Temml's `trust: false`. The output is re-parsed and
+  reduced to MathML elements/attributes (no scripts, handlers, links, `url()` styles).
+- Parse errors never throw: the element gets `math-error`, the message as `title`, and the source as text.
+- Renders are cached by `display + source` (300 entries, least recently used evicted); each call returns a fresh element.
+- Temml and the sanitizer are lazy chunks (`math-impl`, `temml`, `Temml-Local` CSS), fetched by `loadMathJax()` (or
+  the first `renderMath()`), so the main bundle does not carry them. If the chunk cannot be loaded the source is shown
+  as text and the plugin's report gets a warning ("수식 렌더러(Temml)를 불러오지 못해 …"); a later call retries.
+- `finishRenderMath()` is a no-op (the stylesheet is injected once when Temml loads).
+
+### Live preview and concealment (Latex Suite, evidence from its source)
+- `editorLivePreviewField` is read in exactly one place: the math-preview tooltip skips *block* math when live preview
+  is on (`mathPreviewLivePreviewDisplay` off), because Obsidian already renders block math there. It does **not** gate
+  concealment. The shim keeps the field `false`: the task pane is a source-mode editor, and flipping it would make
+  plugins assume Obsidian-rendered markdown.
+- Concealment is gated by the plugin's own `concealEnabled` setting (default off; command "Toggle conceal"). It needed
+  `debounce()` to return a Debouncer with `cancel()`/`run()`; with that, `\alpha + \beta \leq \infty` conceals to
+  `α + β ≤ ∞` and reveals near the cursor, in the real Word task pane.
