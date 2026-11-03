@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MathRenderer, sanitizeMathML } from "../src/plugins/math";
+import { MathRenderer, sanitizeMathML } from "../src/plugins/math-impl";
+import { MathFacade } from "../src/plugins/math";
 import { PluginHost, MATH_FALLBACK_WARNING } from "../src/plugins/host";
 import * as realTemml from "temml";
 
@@ -118,21 +119,31 @@ describe("lazy-load failure falls back to source text", () => {
     expect(r.render("x", false).classList.contains("is-loaded")).toBe(true);
   });
 
+  it("facade: text first, real math once the chunk is loaded; failure -> fallback status and retry", async () => {
+    const f = new MathFacade();
+    f.importImpl = async () => { throw new Error("chunk blocked"); };
+    expect(f.render("x^2", false).textContent).toBe("x^2");
+    expect(await f.load()).toBe(false);
+    expect(f.status).toBe("fallback");
+    expect(f.error).toBe("chunk blocked");
+    f.importImpl = () => import("../src/plugins/math-impl");
+    expect(await f.load()).toBe(true);
+    expect(f.render("x^2", false).querySelector("msup")).not.toBeNull();
+  });
+
   it("a plugin calling loadMathJax gets a compat-report warning when the renderer is unavailable", async () => {
     const { mathRenderer } = await import("../src/plugins/math");
-    const saved = (mathRenderer as any).importer;
-    (mathRenderer as any).importer = failing;
+    const saved = mathRenderer.importImpl;
+    mathRenderer.importImpl = async () => { throw new Error("blocked"); };
     mathRenderer.status = "idle";
-    (mathRenderer as any).loading = null;
     try {
       const host = new PluginHost();
       await host.load({ id: "m", name: "M" } as any, `module.exports = class extends require("obsidian").Plugin { async onload() { await require("obsidian").loadMathJax(); } };`);
       expect(host.reports.get("m")!.warnings).toEqual([MATH_FALLBACK_WARNING]);
       expect(host.reports.get("m")!.loaded).toBe(true);
     } finally {
-      (mathRenderer as any).importer = saved;
+      mathRenderer.importImpl = saved;
       mathRenderer.status = "idle";
-      (mathRenderer as any).loading = null;
     }
   });
 });
