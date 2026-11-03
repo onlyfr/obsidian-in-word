@@ -232,6 +232,15 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       }
     }
 
+    if (equations.length) {
+      // The fallback above swallows per-operation failures: make sure no equation marker was left behind as text.
+      const left = context.document.body.search("OWBEQ", { matchCase: true });
+      left.load("items");
+      await context.sync();
+      if (left.items.length)
+        throw new Error(`수식 ${left.items.length}개를 삽입하지 못했습니다 (Ctrl+Z로 되돌리세요)`);
+    }
+
     // Drop sidecar entries for objects that are no longer referenced by the markdown being applied.
     await saveSidecar(context, pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown)])));
     return { missing };
