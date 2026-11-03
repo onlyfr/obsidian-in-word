@@ -2,6 +2,7 @@ import type { Compartment } from "@codemirror/state";
 import { keymap, type EditorView } from "@codemirror/view";
 import { ObsidianEditor } from "../plugins/editor";
 import { MarkdownView, PluginHost, type CompatReport, type PluginManifest } from "../plugins/host";
+import { askConfirm } from "./confirm";
 import { LocalDataStore, PluginLibrary, type StoredPlugin } from "../plugins/storage";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -83,7 +84,7 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
       if (!manifestText || !mainJs) throw new Error("manifest.json 과 main.js 를 함께 선택하세요 (styles.css 는 선택).");
       const manifest = JSON.parse(manifestText) as PluginManifest;
       if (!manifest.id) throw new Error("manifest.json 에 id 가 없습니다.");
-      if (!confirm(`"${manifest.name}" 플러그인의 코드를 이 작업창에서 그대로 실행합니다. 신뢰하는 플러그인만 불러오세요. 계속할까요?`)) return;
+      if (!(await askConfirm($("plugins"), `"${manifest.name}" 플러그인의 코드를 이 작업창에서 그대로 실행합니다. 신뢰하는 플러그인만 불러오세요. 계속할까요?`))) return;
       const stored: StoredPlugin = { manifest, mainJs, stylesCss: await text("styles.css"), enabled: true };
       await library.save(stored);
       plugins = [...plugins.filter((p) => p.manifest.id !== manifest.id), stored];
