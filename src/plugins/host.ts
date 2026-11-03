@@ -1,3 +1,4 @@
+import { mathRenderer } from "./math";
 import { installObsidianDom } from "./dom";
 import { createI18nextShim, installPrototypeExtensions, requireApiVersion } from "./compat";
 import * as autocomplete from "@codemirror/autocomplete";
@@ -28,6 +29,8 @@ export interface CompatReport {
   unsupportedModules: string[];
   editorExtensions: number;
   commands: number;
+  /** Non-fatal degradations (e.g. math rendering fell back to plain text). */
+  warnings: string[];
 }
 
 export interface PluginCommand {
@@ -80,6 +83,8 @@ function noop(onUse: (name: string) => void, name: string): any {
     construct: () => noop(onUse, name),
   });
 }
+
+export const MATH_FALLBACK_WARNING = "수식 렌더러(Temml)를 불러오지 못해 LaTeX 소스를 텍스트로 표시합니다";
 
 const EXTERNALS: Record<string, unknown> = {
   "@codemirror/autocomplete": autocomplete,
@@ -316,14 +321,14 @@ export class PluginHost {
         }) as T;
       },
       requireApiVersion,
-      // No MathJax in the task pane: previews fall back to the LaTeX source as text.
-      loadMathJax: async () => {},
-      renderMath: (source: string, display: boolean) => {
-        const el = document.createElement("span");
-        el.className = display ? "math math-block" : "math math-inline";
-        el.textContent = source;
-        return el;
+      // Math: Temml (lazy chunk) renders LaTeX to MathML; falls back to the source text if it cannot be loaded.
+      loadMathJax: async () => {
+        if (!(await mathRenderer.load()) && !report.warnings.includes(MATH_FALLBACK_WARNING)) {
+          report.warnings.push(MATH_FALLBACK_WARNING);
+          host.onChange();
+        }
       },
+      renderMath: (source: string, display: boolean) => mathRenderer.render(String(source), !!display),
       finishRenderMath: async () => {},
       addIcon: () => {},
       setIcon: () => {},
@@ -350,6 +355,7 @@ export class PluginHost {
       loaded: false,
       unsupportedApis: [],
       unsupportedModules: [],
+      warnings: [],
       editorExtensions: 0,
       commands: 0,
     };

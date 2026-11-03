@@ -92,7 +92,9 @@ describe("win/doc and math rendering fallbacks", () => {
     (window as any).__out = (v: unknown) => (out = v);
     await host.load({ id: "w", name: "W" } as any, `const o = require("obsidian"); module.exports = class extends o.Plugin { async onload() {
       await o.loadMathJax(); const el = o.renderMath("x^2", false); window.__out({ win: document.body.win === window, text: el.textContent, q: !!el.querySelector }); } };`);
-    expect(out).toEqual({ win: true, text: "x^2", q: true });
+    expect(out.win).toBe(true);
+    expect(out.text).toMatch(/x/); // source text before the lazy chunk is ready, rendered math afterwards
+    expect(out.q).toBe(true);
     const r = host.reports.get("w")!;
     expect(r.unsupportedApis).toEqual([]);
   });
