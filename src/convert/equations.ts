@@ -31,7 +31,7 @@ export interface OoxmlScan {
 }
 
 const TAG_RE =
-  /<m:oMathPara[\s>][\s\S]*?<\/m:oMathPara>|<m:oMath[\s>][\s\S]*?<\/m:oMath>|<wp:inline[\s>]|<wp:anchor[\s>]|<w:pict[\s>]|<w:object[\s>]/g;
+  /<m:oMathPara[\s>][\s\S]*?<\/m:oMathPara>|<m:oMath[\s>][\s\S]*?<\/m:oMath>|<wp:inline[\s>/]|<wp:anchor[\s>/]|<w:pict[\s>/]|<w:object[\s>/]/g;
 
 export function scanOoxml(ooxml: string): OoxmlScan {
   const items: ImgCapture[] = [];
