@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Manifest pointing at the GitHub Pages build. Unofficial personal project; not affiliated with Microsoft or Obsidian. -->
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:type="TaskPaneApp">
+  <Id>6f1d7c52-3b0e-4b6a-9a52-0a1c4f6f7c12</Id>
+  <Version>0.0.1.0</Version>
+  <ProviderName>onlyfr</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="obsidian-in-word"/>
+  <Description DefaultValue="Edit selected Word content as Obsidian-flavored markdown (PoC)."/>
+  <Hosts><Host Name="Document"/></Hosts>
+  <DefaultSettings><SourceLocation DefaultValue="https://onlyfr.github.io/obsidian-in-word/index.html"/></DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+</OfficeApp>
