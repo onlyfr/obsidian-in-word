@@ -29,11 +29,16 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
     view.dispatch({ effects: compartment.reconfigure([...host.stateFields(), ...host.extensions(), keymap.of(bindings)]) });
   };
 
-  const renderReport = (r: CompatReport | undefined): HTMLElement => {
+  const renderReport = (r: CompatReport | undefined, enabled: boolean): HTMLElement => {
     const box = el("div", "", "plugin-report");
+    if (!enabled) {
+      box.append(el("div", "꺼짐"));
+      return box;
+    }
     if (!r) return box;
     box.append(el("div", r.loaded ? `✓ 로드됨 (확장 ${r.editorExtensions}, 명령 ${r.commands})` : `✗ 실패: ${r.error ?? "알 수 없음"}`));
     if (r.unsupportedModules.length) box.append(el("div", `미지원 모듈: ${r.unsupportedModules.join(", ")}`));
+    for (const w of r.warnings ?? []) box.append(el("div", `⚠ ${w}`));
     if (r.unsupportedApis.length) box.append(el("div", `미지원 API: ${r.unsupportedApis.slice(0, 12).join(", ")}${r.unsupportedApis.length > 12 ? " …" : ""}`));
     return box;
   };
@@ -58,7 +63,7 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
           render();
         };
         head.append(toggle, del);
-        row.append(head, renderReport(host.reports.get(p.manifest.id)));
+        row.append(head, renderReport(host.reports.get(p.manifest.id), p.enabled));
         return row;
       }),
     );

@@ -92,8 +92,37 @@ describe("win/doc and math rendering fallbacks", () => {
     (window as any).__out = (v: unknown) => (out = v);
     await host.load({ id: "w", name: "W" } as any, `const o = require("obsidian"); module.exports = class extends o.Plugin { async onload() {
       await o.loadMathJax(); const el = o.renderMath("x^2", false); window.__out({ win: document.body.win === window, text: el.textContent, q: !!el.querySelector }); } };`);
-    expect(out).toEqual({ win: true, text: "x^2", q: true });
+    expect(out.win).toBe(true);
+    expect(out.text).toMatch(/x/); // source text before the lazy chunk is ready, rendered math afterwards
+    expect(out.q).toBe(true);
     const r = host.reports.get("w")!;
     expect(r.unsupportedApis).toEqual([]);
+  });
+});
+
+describe("debounce (Obsidian Debouncer)", () => {
+  it("has cancel() and run(), debounces to the last arguments", async () => {
+    const { debounce } = await import("../src/plugins/host");
+    const calls: number[] = [];
+    const d = debounce((n: number) => calls.push(n), 10);
+    d(1); d(2);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([2]);
+    d(3); d.cancel();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([2]);
+    d(4); d.run();
+    expect(calls).toEqual([2, 4]);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([2, 4]);
+  });
+  it("resetTimer restarts the wait on every call", async () => {
+    const { debounce } = await import("../src/plugins/host");
+    let n = 0;
+    const d = debounce(() => n++, 30, true);
+    d(); await new Promise((r) => setTimeout(r, 20)); d(); await new Promise((r) => setTimeout(r, 20));
+    expect(n).toBe(0);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(n).toBe(1);
   });
 });
