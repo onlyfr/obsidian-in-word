@@ -26,7 +26,13 @@ npm test        # 변환 단위 테스트
 npm run build   # 타입체크 + 번들
 ```
 
-Word에서 실행하려면 HTTPS 개발 서버와 사이드로드가 필요합니다.
+### 로컬 서버 없이 사용 (GitHub Pages)
+`main`에 푸시하면 GitHub Actions가 빌드해서 GitHub Pages(`https://onlyfr.github.io/obsidian-in-word/`)에 정적 파일로 배포합니다. 이 경우 로컬 서버나 인증서 없이 `manifest.prod.xml`만 Word에 사이드로드하면 됩니다. 코드는 서버가 아니라 Word 작업창 안에서 실행됩니다.
+
+사전 설정: 저장소 Settings → Pages → Source를 **GitHub Actions**로 지정해야 합니다.
+
+### 개발용 로컬 서버
+코드를 수정하며 바로 확인하려면 HTTPS 개발 서버와 `manifest.xml` 사이드로드가 필요합니다.
 
 1. `certs/localhost.key`, `certs/localhost.crt`를 준비합니다 (예: `mkcert localhost`).
 2. `npm run dev` 로 `https://localhost:3000` 서버를 띄웁니다.
