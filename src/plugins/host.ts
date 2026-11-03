@@ -43,6 +43,18 @@ export interface DataStore {
   set(pluginId: string, data: unknown): void;
 }
 
+/** Stand-in for Obsidian's MarkdownView: the single editor of the task pane. */
+export class MarkdownView {
+  file = null;
+  constructor(public editor: unknown) {}
+  getViewType() {
+    return "markdown";
+  }
+  getMode() {
+    return "source";
+  }
+}
+
 export class MemoryDataStore implements DataStore {
   private m = new Map<string, unknown>();
   get(id: string) {
@@ -86,6 +98,8 @@ export class PluginHost {
   private readonly commandsById = new Map<string, PluginCommand[]>();
   private readonly instances = new Map<string, { unload(): void }>();
   onChange: () => void = () => {};
+  /** The view that `workspace.getActiveViewOfType(MarkdownView)` returns (set by the task pane). */
+  activeView: MarkdownView | null = null;
 
   constructor(
     private readonly store: DataStore = new MemoryDataStore(),
@@ -99,6 +113,43 @@ export class PluginHost {
 
   commands(): PluginCommand[] {
     return [...this.commandsById.values()].flat();
+  }
+
+  /** Run a command by id. Returns false if it does not exist or its check callback declines. */
+  runCommand(id: string): boolean {
+    const cmd = this.commands().find((c) => c.id === id);
+    if (!cmd) return false;
+    const editor = this.activeView?.editor;
+    try {
+      if (cmd.editorCheckCallback) {
+        if (!editor || cmd.editorCheckCallback(true, editor, this.activeView) === false) return false;
+        cmd.editorCheckCallback(false, editor, this.activeView);
+        return true;
+      }
+      if (cmd.editorCallback) {
+        if (!editor) return false;
+        cmd.editorCallback(editor, this.activeView);
+        return true;
+      }
+      if (cmd.callback) {
+        cmd.callback();
+        return true;
+      }
+    } catch (e) {
+      this.notify(`${cmd.name}: ${(e as Error).message}`);
+    }
+    return false;
+  }
+
+  /** Hotkeys declared by commands, as CodeMirror key strings (Mod = Ctrl/Cmd). */
+  hotkeys(): { key: string; commandId: string }[] {
+    const norm: Record<string, string> = { Mod: "Mod", Ctrl: "Ctrl", Meta: "Meta", Shift: "Shift", Alt: "Alt" };
+    return this.commands().flatMap((c) =>
+      (c.hotkeys ?? []).map((h) => ({
+        key: [...h.modifiers.map((m) => norm[m] ?? m), h.key.length === 1 ? h.key.toLowerCase() : h.key].join("-"),
+        commandId: c.id,
+      })),
+    );
   }
 
   private makeObsidian(report: CompatReport, manifest: PluginManifest) {
@@ -191,7 +242,11 @@ export class PluginHost {
             on: () => ({}),
             off: () => {},
             onLayoutReady: (cb: () => void) => cb(),
-            getActiveViewOfType: () => null,
+            getActiveViewOfType: (type: unknown) =>
+              host.activeView && typeof type === "function" && host.activeView instanceof (type as any) ? host.activeView : null,
+            get activeEditor() {
+              return host.activeView ? { editor: host.activeView.editor, file: null } : null;
+            },
             getActiveFile: () => null,
             trigger: () => {},
             // Plugins call this after changing their editor extensions; re-read them from the host.
@@ -213,6 +268,7 @@ export class PluginHost {
       Component,
       Plugin,
       Notice,
+      MarkdownView,
       // A browser-hosted add-in is neither the desktop app nor mobile. isDesktop must be false so plugins
       // do not take their Node `fs`/`path` code paths (Latex Suite does this for snippet files).
       Platform: {
