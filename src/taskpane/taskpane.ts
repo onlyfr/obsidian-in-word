@@ -1,15 +1,23 @@
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { readSelectionAsMarkdown, replaceSelectionWithMarkdown } from "./word";
+import { initPlugins } from "./plugins-ui";
 
 const status = document.getElementById("status")!;
 const setStatus = (msg: string) => (status.textContent = msg);
 
-// Extension point: compatible CM6-based community extensions (e.g. snippet/conceal helpers)
-// get appended here once a thin Obsidian API shim exists.
-const extensions = [lineNumbers(), history(), keymap.of([...defaultKeymap, ...historyKeymap]), markdown(), EditorView.lineWrapping];
+// Extensions registered by loaded Obsidian community plugins are swapped into this compartment.
+const pluginExtensions = new Compartment();
+const extensions = [
+  lineNumbers(),
+  history(),
+  keymap.of([...defaultKeymap, ...historyKeymap]),
+  markdown(),
+  EditorView.lineWrapping,
+  pluginExtensions.of([]),
+];
 
 const view = new EditorView({
   state: EditorState.create({ doc: "", extensions }),
@@ -18,6 +26,8 @@ const view = new EditorView({
 
 const setDoc = (text: string) =>
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+
+initPlugins(view, pluginExtensions, setStatus).catch((e) => setStatus(`플러그인 초기화 실패: ${(e as Error).message}`));
 
 async function run(label: string, fn: () => Promise<string[] | void>) {
   try {

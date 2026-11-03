@@ -1,3 +1,5 @@
+import { installObsidianDom } from "./dom";
+import { createI18nextShim, installPrototypeExtensions, requireApiVersion } from "./compat";
 import * as autocomplete from "@codemirror/autocomplete";
 import * as commands from "@codemirror/commands";
 import * as language from "@codemirror/language";
@@ -8,7 +10,7 @@ import * as view from "@codemirror/view";
 import * as lezerCommon from "@lezer/common";
 import * as lezerHighlight from "@lezer/highlight";
 import * as lezerLr from "@lezer/lr";
-import type { Extension } from "@codemirror/state";
+import { StateField, type Extension } from "@codemirror/state";
 
 export interface PluginManifest {
   id: string;
@@ -41,6 +43,18 @@ export interface PluginCommand {
 export interface DataStore {
   get(pluginId: string): unknown;
   set(pluginId: string, data: unknown): void;
+}
+
+/** Stand-in for Obsidian's MarkdownView: the single editor of the task pane. */
+export class MarkdownView {
+  file = null;
+  constructor(public editor: unknown) {}
+  getViewType() {
+    return "markdown";
+  }
+  getMode() {
+    return "source";
+  }
 }
 
 export class MemoryDataStore implements DataStore {
@@ -86,6 +100,8 @@ export class PluginHost {
   private readonly commandsById = new Map<string, PluginCommand[]>();
   private readonly instances = new Map<string, { unload(): void }>();
   onChange: () => void = () => {};
+  /** The view that `workspace.getActiveViewOfType(MarkdownView)` returns (set by the task pane). */
+  activeView: MarkdownView | null = null;
 
   constructor(
     private readonly store: DataStore = new MemoryDataStore(),
@@ -93,12 +109,64 @@ export class PluginHost {
   ) {}
 
   /** All editor extensions registered by loaded plugins, to feed a CM6 Compartment. */
+  /**
+   * Obsidian-provided state fields plugins read through `obsidian.editorLivePreviewField` / `editorInfoField`.
+   * Source mode (no live preview); the info object points at the task pane editor and has no file.
+   */
+  readonly livePreviewField = StateField.define<boolean>({ create: () => false, update: (v) => v });
+  readonly infoField = StateField.define<unknown>({
+    create: () => ({ app: undefined, file: null, editor: this.activeView?.editor ?? null, view: this.activeView, hoverPopover: null }),
+    update: (v) => v,
+  });
+
+  /** The two Obsidian state fields; must be part of the same editor state as the plugins' extensions. */
+  stateFields(): Extension[] {
+    return this.extensionsById.size ? [this.livePreviewField, this.infoField] : [];
+  }
+
   extensions(): Extension[] {
     return [...this.extensionsById.values()].flat();
   }
 
   commands(): PluginCommand[] {
     return [...this.commandsById.values()].flat();
+  }
+
+  /** Run a command by id. Returns false if it does not exist or its check callback declines. */
+  runCommand(id: string): boolean {
+    const cmd = this.commands().find((c) => c.id === id);
+    if (!cmd) return false;
+    const editor = this.activeView?.editor;
+    try {
+      if (cmd.editorCheckCallback) {
+        if (!editor || cmd.editorCheckCallback(true, editor, this.activeView) === false) return false;
+        cmd.editorCheckCallback(false, editor, this.activeView);
+        return true;
+      }
+      if (cmd.editorCallback) {
+        if (!editor) return false;
+        cmd.editorCallback(editor, this.activeView);
+        return true;
+      }
+      if (cmd.callback) {
+        cmd.callback();
+        return true;
+      }
+    } catch (e) {
+      this.notify(`${cmd.name}: ${(e as Error).message}`);
+    }
+    return false;
+  }
+
+  /** Hotkeys declared by commands, as CodeMirror key strings (Mod = Ctrl/Cmd). */
+  hotkeys(): { key: string; commandId: string }[] {
+    const norm: Record<string, string> = { Mod: "Mod", Ctrl: "Ctrl", Meta: "Meta", Shift: "Shift", Alt: "Alt" };
+    return this.commands().flatMap((c) =>
+      (c.hotkeys ?? []).map((h) => ({
+        key: [...h.modifiers.map((m) => norm[m] ?? m), h.key.length === 1 ? h.key.toLowerCase() : h.key].join("-"),
+        commandId: c.id,
+      })),
+    );
   }
 
   private makeObsidian(report: CompatReport, manifest: PluginManifest) {
@@ -191,7 +259,11 @@ export class PluginHost {
             on: () => ({}),
             off: () => {},
             onLayoutReady: (cb: () => void) => cb(),
-            getActiveViewOfType: () => null,
+            getActiveViewOfType: (type: unknown) =>
+              host.activeView && typeof type === "function" && host.activeView instanceof (type as any) ? host.activeView : null,
+            get activeEditor() {
+              return host.activeView ? { editor: host.activeView.editor, file: null } : null;
+            },
             getActiveFile: () => null,
             trigger: () => {},
             // Plugins call this after changing their editor extensions; re-read them from the host.
@@ -213,6 +285,7 @@ export class PluginHost {
       Component,
       Plugin,
       Notice,
+      MarkdownView,
       // A browser-hosted add-in is neither the desktop app nor mobile. isDesktop must be false so plugins
       // do not take their Node `fs`/`path` code paths (Latex Suite does this for snippet files).
       Platform: {
@@ -227,6 +300,8 @@ export class PluginHost {
       TFile: class {},
       TFolder: class {},
       PluginSettingTab: class {},
+      SettingTab: class {},
+      AbstractInputSuggest: class {},
       Modal: class {},
       Setting: class {
         constructor() {
@@ -240,6 +315,21 @@ export class PluginHost {
           h = setTimeout(() => fn(...a), ms);
         }) as T;
       },
+      requireApiVersion,
+      // No MathJax in the task pane: previews fall back to the LaTeX source as text.
+      loadMathJax: async () => {},
+      renderMath: (source: string, display: boolean) => {
+        const el = document.createElement("span");
+        el.className = display ? "math math-block" : "math math-inline";
+        el.textContent = source;
+        return el;
+      },
+      finishRenderMath: async () => {},
+      addIcon: () => {},
+      setIcon: () => {},
+      editorLivePreviewField: host.livePreviewField,
+      editorInfoField: host.infoField,
+      apiVersion: "1.8.0",
       normalizePath: (p: string) => p.replace(/\\/g, "/").replace(/\/+/g, "/"),
     };
     const obsidian = new Proxy(mod, {
@@ -269,6 +359,13 @@ export class PluginHost {
     this.extensionsById.set(manifest.id, []);
     this.commandsById.set(manifest.id, []);
     try {
+      // Obsidian provides window.i18next to plugins.
+      installPrototypeExtensions();
+      installObsidianDom();
+      // Obsidian's multi-window globals.
+      if (!(window as any).activeDocument) (window as any).activeDocument = document;
+      if (!(window as any).activeWindow) (window as any).activeWindow = window;
+      if (!(window as any).i18next) (window as any).i18next = createI18nextShim();
       const { obsidian, appShim } = this.makeObsidian(report, manifest);
       const req = (name: string) => {
         if (name === "obsidian") return obsidian;

@@ -6,9 +6,9 @@
 ## 계층
 1. **로더** (`src/plugins/host.ts`, 구현됨): `main.js`를 `module/exports/require` 샌드박스 함수로 실행한다. `obsidian`과 `@codemirror/*`, `@lezer/*`는 번들에 포함된 동일 모듈을 주입한다(플러그인이 자체 복사본을 쓰면 CM6 `instanceof` 검사가 깨지므로 반드시 공유).
 2. **Obsidian API 흉내** (구현됨, 최소): `Plugin`, `Component`, `Notice`, `Platform`, `TFile/TFolder`, `debounce`, `app.workspace/vault/metadataCache` 일부. 구현하지 않은 API는 호출되어도 죽지 않고 **호환성 보고서**에 기록된다.
-3. **에디터 연결** (미구현): `registerEditorExtension`으로 모은 확장을 작업창 CM6 에디터의 `Compartment`에 넣는다. `workspace.updateOptions()`가 호출되면 다시 읽는다.
-4. **편집 API** (미구현): `editorCallback`/`editorCheckCallback`에 넘길 `Editor` 객체(`getValue`, `getSelection`, `replaceSelection`, `getCursor`, `cm` = `EditorView` 등)와 `MarkdownView` 대역.
-5. **UI** (미구현): 명령 목록/단축키 연결, 설정 탭(`PluginSettingTab`/`Setting`) 렌더링, 플러그인 파일 불러오기와 저장(IndexedDB), 호환성 보고서 표시.
+3. **에디터 연결** (구현됨, 실기 검증 전): `registerEditorExtension`으로 모은 확장과 명령 단축키를 작업창 CM6 에디터의 `Compartment`에 넣는다. `workspace.updateOptions()`가 호출되면 다시 읽는다. (`src/taskpane/plugins-ui.ts`)
+4. **편집 API** (구현됨): `editorCallback`/`editorCheckCallback`에 넘기는 `Editor`(`getValue`, `getSelection`, `replaceSelection`, `getCursor`, `replaceRange`, `cm` = `EditorView` 등, `src/plugins/editor.ts`)와 `MarkdownView` 대역. `workspace.getActiveViewOfType(MarkdownView)`는 작업창의 단일 에디터를 돌려준다.
+5. **UI** (일부 구현): 플러그인 파일(manifest.json + main.js [+ styles.css]) 불러오기, IndexedDB 저장, 켜기/끄기/삭제, 호환성 보고서 표시, 명령 실행 목록과 단축키. **미구현**: 설정 탭(`PluginSettingTab`/`Setting`) 렌더링, 플러그인 업데이트.
 
 ## 실제 번들 분석 (Latex Suite 1.14.1, 정적 분석만 수행)
 - 외부 모듈: `@codemirror/{view,state,language,commands,autocomplete,search,lint}`, `@lezer/{common,lr,highlight}`, `obsidian`. 모두 주입 가능.
@@ -20,3 +20,12 @@
 - Word 본문에 직접 타이핑할 때는 키 입력을 가로챌 수 없으므로 플러그인은 **작업창 에디터 안에서만** 동작한다.
 - 플러그인은 내려받은 JS를 애드인 출처에서 그대로 실행한다(Office.js 접근 가능). 신뢰하는 플러그인만 불러오도록 UI에서 경고한다.
 - 이 저장소는 플러그인 코드를 포함하거나 재배포하지 않는다. 사용자가 직접 파일을 불러온다.
+
+## Verified against a real plugin (Latex Suite 1.14.1)
+
+Loading it in the real Word task pane needed these generic shims (all covered by `tests/compat.test.ts`):
+`window.confirm` is unsupported in Word's WebView (replaced by an inline confirmation), `requireApiVersion`,
+a minimal `window.i18next`, `activeDocument`/`activeWindow`, Obsidian's prototype extensions (`String#contains`, ...),
+DOM helpers (`createEl`, `createDiv`, `el.addClass`, `el.empty`, `node.win`, ...), the `editorLivePreviewField`
+(always source mode) and `editorInfoField` state fields, `renderMath`/`loadMathJax` fallbacks (LaTeX source as text).
+Not available: MathJax rendering, live-preview conceal, vim integration, files/vault access.

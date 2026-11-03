@@ -114,3 +114,69 @@ describe("PluginHost compatibility details", () => {
     expect(host.commands()[0].editorCheckCallback!(false, null, null)).toBe(true);
   });
 });
+
+import { EditorView } from "@codemirror/view";
+import { ObsidianEditor } from "../src/plugins/editor";
+import { MarkdownView } from "../src/plugins/host";
+
+describe("Editor shim and command running", () => {
+  const makeEditor = (doc: string) => {
+    const view = new EditorView({ doc, parent: document.body });
+    return { view, editor: new ObsidianEditor(view) };
+  };
+
+  it("implements the common Editor API on a CM6 view", () => {
+    const { editor } = makeEditor("hello\nworld");
+    expect(editor.getValue()).toBe("hello\nworld");
+    expect(editor.lineCount()).toBe(2);
+    expect(editor.getLine(1)).toBe("world");
+    editor.setSelection({ line: 0, ch: 1 }, { line: 0, ch: 4 });
+    expect(editor.getSelection()).toBe("ell");
+    editor.replaceSelection("ipp");
+    expect(editor.getValue()).toBe("hippo\nworld");
+    expect(editor.getCursor("to")).toEqual({ line: 0, ch: 4 });
+    editor.replaceRange("W", { line: 1, ch: 0 }, { line: 1, ch: 1 });
+    expect(editor.getRange({ line: 1, ch: 0 }, { line: 1, ch: 5 })).toBe("World");
+    expect(editor.offsetToPos(editor.posToOffset({ line: 1, ch: 2 }))).toEqual({ line: 1, ch: 2 });
+  });
+
+  const editorPlugin = `
+    const { Plugin, MarkdownView } = require("obsidian");
+    module.exports = class P extends Plugin {
+      onload() {
+        this.addCommand({ id: "up", name: "Uppercase", hotkeys: [{ modifiers: ["Mod", "Shift"], key: "U" }],
+          editorCallback: (editor) => editor.setValue(editor.getValue().toUpperCase()) });
+        this.addCommand({ id: "sel", name: "Needs selection",
+          editorCheckCallback: (checking, editor) => { if (!editor.somethingSelected()) return false; if (!checking) editor.replaceSelection("X"); return true; } });
+        this.addCommand({ id: "active", name: "Active view",
+          callback: () => { const v = this.app.workspace.getActiveViewOfType(MarkdownView); v && v.editor.setValue("viewed"); } });
+      }
+    };`;
+
+  it("runs editor commands against the active editor and reports hotkeys", async () => {
+    const { editor } = makeEditor("abc");
+    const host = new PluginHost();
+    host.activeView = new MarkdownView(editor);
+    await host.load({ id: "p", name: "P" }, editorPlugin);
+    expect(host.hotkeys()).toEqual([{ key: "Mod-Shift-u", commandId: "p:up" }]);
+    expect(host.runCommand("p:up")).toBe(true);
+    expect(editor.getValue()).toBe("ABC");
+    expect(host.runCommand("p:sel")).toBe(false); // check callback declines without a selection
+    editor.setSelection({ line: 0, ch: 0 }, { line: 0, ch: 1 });
+    expect(host.runCommand("p:sel")).toBe(true);
+    expect(editor.getValue()).toBe("XBC");
+    expect(host.runCommand("p:active")).toBe(true);
+    expect(editor.getValue()).toBe("viewed");
+    expect(host.runCommand("p:missing")).toBe(false);
+  });
+
+  it("reports command errors through notify instead of throwing", async () => {
+    const notices: string[] = [];
+    const host = new PluginHost(undefined, (m) => notices.push(m));
+    const src = `const { Plugin } = require("obsidian");
+      module.exports = class P extends Plugin { onload() { this.addCommand({ id: "x", name: "Boom", callback: () => { throw new Error("bad"); } }); } };`;
+    await host.load({ id: "p", name: "P" }, src);
+    expect(host.runCommand("p:x")).toBe(false);
+    expect(notices).toEqual(["Boom: bad"]);
+  });
+});

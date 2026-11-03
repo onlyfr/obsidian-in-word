@@ -5,3 +5,17 @@ button { flex: 1; padding: 6px 8px; cursor: pointer; }
 #editor { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid #8884; }
 .cm-editor { height: 100%; }
 #status { margin: 0; padding: 6px 8px; min-height: 1.4em; opacity: 0.8; }
+
+#plugins { padding: 4px 8px 8px; border-top: 1px solid #8884; max-height: 40vh; overflow: auto; }
+#plugins .warn { margin: 4px 0; font-size: 12px; opacity: 0.8; }
+.plugin-row { margin: 6px 0; }
+.plugin-name { display: flex; gap: 6px; align-items: center; font-weight: 600; }
+.plugin-name button { flex: none; padding: 2px 6px; }
+.plugin-report { font-size: 12px; opacity: 0.85; }
+.cmd-row { display: flex; gap: 6px; margin-top: 6px; }
+.cmd-row select { flex: 1; min-width: 0; }
+.cmd-row button { flex: none; }
+
+.inline-confirm { margin: 6px 0; padding: 6px; border: 1px solid #c80; border-radius: 4px; }
+.inline-confirm p { margin: 0 0 6px; }
+.inline-confirm button { margin-right: 6px; flex: none; }
