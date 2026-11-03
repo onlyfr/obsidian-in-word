@@ -55,7 +55,7 @@ export function parseStyleNames(html: string): Map<string, string> {
 }
 
 /** Paragraph classes that need no marker: Word's default style and list paragraphs (turned into md lists). */
-const isDefaultParagraphClass = (cls: string) => cls === "" || cls === "MsoNormal" || cls.startsWith("MsoList");
+const isDefaultParagraphClass = (cls: string) => cls === "" || cls === "MsoNormal";
 /**
  * getHtml output contains per-call noise: images get a temp name (~WRS{GUID}.files/...) and Word
  * assigns fresh paragraph GUID ids. Strip both so an object keeps the same placeholder id across loads/applies.
@@ -65,6 +65,10 @@ export function stableHtml(html: string): string {
     .replace(/~WRS%7b[0-9a-f-]+%7d/gi, "~WRS")
     .replace(/\sid=(["']?)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\1/gi, "");
 }
+
+/** 1x1 transparent PNG used when a picture's bytes cannot be read through Office.js (e.g. floating pictures). */
+export const BLANK_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
 /** Base64 image data -> data URI (format sniffed from the magic bytes). */
 export function toDataUri(b64: string): string {
@@ -86,27 +90,72 @@ export const PLACEHOLDER_SPLIT_RE = /^<!-- word:obj id=([0-9a-f]{8}) kind=([a-z]
  */
 function normalizeLists(parent: Element): void {
   const doc = parent.ownerDocument;
-  let cur: Element | null = null;
-  let curTag = "";
-  for (const el of Array.from(parent.children)) {
-    const m = el.tagName === "P" ? /MsoList(Bullet|Number)/.exec(el.className) : null;
-    if (!m) {
-      cur = null;
-      continue;
-    }
-    const tag = m[1] === "Number" ? "ol" : "ul";
-    const marker = Array.from(el.children).find(
-      (c) => c.tagName === "SPAN" && (/Wingdings|Symbol|mso-list:\s*Ignore/i.test(c.getAttribute("style") ?? "") || c.querySelector('span[style*="7.0pt"]')),
-    );
-    marker?.remove();
-    if (!cur || curTag !== tag) {
-      cur = doc.createElement(tag);
-      curTag = tag;
-      el.before(cur);
+  const items = Array.from(parent.children).map((el) => ({ el, marker: listMarker(el) }));
+  let group: { el: Element; marker: Element }[] = [];
+  const flush = () => {
+    if (group.length) buildLists(doc, group);
+    group = [];
+  };
+  for (const it of items) {
+    if (it.marker) group.push({ el: it.el, marker: it.marker });
+    else flush();
+  }
+  flush();
+}
+
+/** The bullet/number span at the start of a Word list paragraph, or undefined if `el` is not a list item. */
+function listMarker(el: Element): Element | undefined {
+  if (el.tagName !== "P" || !/^MsoList/.test(el.className)) return undefined;
+  return Array.from(el.children).find(
+    (c) =>
+      c.tagName === "SPAN" &&
+      (/Wingdings|Symbol|mso-list:\s*Ignore/i.test(c.getAttribute("style") ?? "") || c.querySelector('span[style*="7.0pt"]')),
+  );
+}
+
+const marginLeft = (el: Element) => Number(/margin-left:\s*([\d.]+)pt/i.exec(el.getAttribute("style") ?? "")?.[1] ?? 0);
+
+/**
+ * Real Word shape (getHtml): consecutive `<p class=MsoListBullet.../MsoListNumber.../MsoListParagraph>` whose
+ * nesting level is only visible in `margin-left`, with the marker text ("3.", "1)", "·") in a leading span.
+ * Rebuild nested <ul>/<ol>/<li> (ordered lists keep their start number).
+ */
+function buildLists(doc: Document, group: { el: Element; marker: Element }[]): void {
+  const margins = [...new Set(group.map((g) => marginLeft(g.el)))].sort((a, b) => a - b);
+  const stack: { list: Element; level: number; ordered: boolean }[] = [];
+  const anchor = group[0].el;
+  let lastTop: Element | null = null; // previous top-level list built for this group
+  for (const { el, marker } of group) {
+    const level = margins.indexOf(marginLeft(el));
+    const markerText = (marker.firstChild?.textContent ?? marker.textContent ?? "").replace(/\s| /g, "");
+    const ordered = /^[0-9a-zA-Z]+[.)]$/.test(markerText);
+    marker.remove();
+    while (stack.length && stack[stack.length - 1].level > level) stack.pop();
+    // Same level but another list type (bullet <-> number) starts a new sibling list.
+    if (stack.length && stack[stack.length - 1].level === level && stack[stack.length - 1].ordered !== ordered) stack.pop();
+    if (!stack.length || stack[stack.length - 1].level < level) {
+      const list = doc.createElement(ordered ? "ol" : "ul");
+      const start = ordered ? parseInt(markerText, 10) : NaN;
+      if (start > 1) list.setAttribute("start", String(start));
+      const host = stack.length ? stack[stack.length - 1].list.lastElementChild : null;
+      if (host) host.append(list);
+      else {
+        if (lastTop) lastTop.after(list);
+        else anchor.before(list);
+        lastTop = list;
+        // List Bullet / List Number are not the default list style (List Paragraph): remember them with a marker.
+        const base = /^(MsoList(?:Bullet|Number)\d?)/.exec(el.className)?.[1];
+        if (base) {
+          const mk = doc.createElement("p");
+          mk.textContent = `OWBSTYLE${toHex(base)}N${toHex(base)}END`;
+          list.before(mk);
+        }
+      }
+      stack.push({ list, level, ordered });
     }
     const li = doc.createElement("li");
     li.innerHTML = el.innerHTML;
-    cur.append(li);
+    stack[stack.length - 1].list.append(li);
     el.remove();
   }
 }
@@ -117,11 +166,13 @@ export function protectOpaque(
   sidecar: Sidecar,
   styleNames: Map<string, string> = new Map(),
   /** Base64 image data (document order) from Office.js; replaces the temp `~WRS...` src that getHtml emits. */
-  images: string[] = [],
+  images?: string[],
 ): string {
   const doc = new DOMParser().parseFromString(`<body>${bodyHtml}</body>`, "text/html");
-  const imgs = Array.from(doc.body.querySelectorAll("img"));
-  const embed = images.length > 0 && images.length === imgs.length; // only trust a 1:1 match
+  // Floating pictures are plain <img align=left|right> in getHtml and are not part of Office.js inlinePictures.
+  const isFloating = (img: Element) => /^(left|right)$/i.test(img.getAttribute("align") ?? "");
+  const inlineCount = Array.from(doc.body.querySelectorAll("img")).filter((i) => !isFloating(i)).length;
+  const embed = images !== undefined && images.length === inlineCount; // only trust a 1:1 match
   let imgIndex = 0;
   // Word wraps content in <div class="WordSection1">; look inside plain divs so that one table
   // does not make the whole section opaque.
@@ -143,9 +194,14 @@ export function protectOpaque(
         continue;
       }
       const id = hashId(stableHtml(el.outerHTML));
-      if (embed) {
+      if (images !== undefined) {
         const inner = el.tagName === "IMG" ? [el] : Array.from(el.querySelectorAll("img"));
-        for (const img of inner) img.setAttribute("src", toDataUri(images[imgIndex++]));
+        for (const img of inner) {
+          // The temp ~WRS src does not survive (restoring it hangs Word on the next getHtml), so never keep it.
+          const bytes = embed && !isFloating(img) ? images[imgIndex++] : undefined;
+          img.setAttribute("src", bytes ? toDataUri(bytes) : BLANK_PNG);
+          if (!bytes) img.setAttribute("alt", "picture not preserved");
+        }
       }
       const html = el.outerHTML;
       sidecar.set(id, { kind, html });

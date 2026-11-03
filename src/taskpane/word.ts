@@ -71,17 +71,30 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
     await context.sync();
 
     // insertHtml may ignore class/mso-style-name (e.g. built-in Quote), so set styles explicitly by name.
+    // One sync for all of them: every sync that changes the document is a separate Undo step.
     const used = new Set<number>();
     const paras = inserted.paragraphs.items;
+    const targets: { idx: number; style: string }[] = [];
     for (const spec of styled) {
       const idx = paras.findIndex((p, i) => !used.has(i) && norm(p.text) === norm(spec.text));
       if (idx < 0) continue;
       used.add(idx);
+      targets.push({ idx, style: spec.style });
+    }
+    if (targets.length) {
       try {
-        paras[idx].style = spec.style;
+        for (const t of targets) paras[t.idx].style = t.style;
         await context.sync();
       } catch {
-        // unknown style name in this document: keep whatever insertHtml produced
+        // an unknown style name fails the whole batch: retry one by one and skip the bad ones
+        for (const t of targets) {
+          try {
+            paras[t.idx].style = t.style;
+            await context.sync();
+          } catch {
+            /* keep whatever insertHtml produced */
+          }
+        }
       }
     }
 

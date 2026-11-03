@@ -34,13 +34,29 @@ md.block.ruler.before("paragraph", "word_style", (state, startLine, _endLine, si
   return true;
 });
 
+// List items get an explicit class: insertHtml otherwise makes them "Normal (Web)", and setting a style through
+// Office.js afterwards would strip the list formatting. `<li class=MsoListParagraph>` keeps a real list.
+const DEFAULT_LIST_CLASS = "MsoListParagraph";
+
 md.core.ruler.after("block", "word_style_apply", (state) => {
   const env = state.env as StyleEnv;
   let pending = null as { cls: string; name: string } | null;
+  let listCls: string | null = null;
+  let listLevel = -1;
   state.tokens = state.tokens.filter((t) => {
     if (t.type === "word_style") {
       pending = t.meta as { cls: string; name: string };
       return false;
+    }
+    if ((t.type === "bullet_list_open" || t.type === "ordered_list_open") && listCls === null) {
+      listCls = pending?.cls ?? DEFAULT_LIST_CLASS;
+      listLevel = t.level;
+      pending = null;
+    }
+    if (t.type === "list_item_open" && listCls) t.attrSet("class", listCls);
+    if ((t.type === "bullet_list_close" || t.type === "ordered_list_close") && t.level === listLevel) {
+      listCls = null;
+      listLevel = -1;
     }
     if (t.type === "paragraph_open" && t.level === 0 && !t.hidden) {
       // Without an explicit class, insertHtml would use "Normal (Web)"; MsoNormal maps to Word's Normal.
@@ -90,12 +106,13 @@ export function htmlToMarkdown(
   /** class -> real Word style name (e.g. from Office.js), overriding names parsed from the HTML. */
   styleNameHints: Map<string, string> = new Map(),
   /** Base64 data of the selection's inline pictures, in document order. */
-  images: string[] = [],
+  images?: string[],
 ): string {
   const styleNames = new Map([...parseStyleNames(html), ...styleNameHints]);
   const out = tokensToPlaceholders(td.turndown(protectOpaque(cleanWordHtml(html), sidecar, styleNames, images)));
   return out
     .replace(/^(\s*)-   /gm, "$1- ") // turndown pads list items to 4 columns
+    .replace(/^(\s*)(\d+\.) {2,}/gm, "$1$2 ")
     .replace(/\\\[\\\[(.+?)\\\]\\\]/g, "[[$1]]") // turndown escapes the brackets of plain-text [[wikilinks]]
     .replace(/(<!-- word:style [^>]*-->)\n\n(?=\S)/g, "$1\n") // keep a style marker next to its paragraph
     .replace(/^> \*\*\\\[!(\w+)\\\]\s*(.*?)\*\*\n>[ \t]*\n/gm, (_m, type: string, title: string) =>
