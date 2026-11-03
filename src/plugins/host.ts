@@ -245,8 +245,26 @@ export class PluginHost {
 
     class Component {
       private cleanups: (() => void)[] = [];
+      private children: { unload(): void; load?(): void }[] = [];
+      private loaded = false;
+      load() {
+        if (this.loaded) return;
+        this.loaded = true;
+        void this.onload();
+        for (const c of this.children) c.load?.();
+      }
       onload(): void | Promise<void> {}
       onunload(): void {}
+      addChild<T extends { unload(): void; load?(): void }>(child: T): T {
+        this.children.push(child);
+        if (this.loaded) child.load?.();
+        return child;
+      }
+      removeChild<T extends { unload(): void }>(child: T): T {
+        this.children = this.children.filter((c) => c !== child);
+        child.unload();
+        return child;
+      }
       register(cb: () => void) {
         this.cleanups.push(cb);
       }
@@ -260,6 +278,8 @@ export class PluginHost {
         return id;
       }
       unload() {
+        for (const c of this.children.splice(0)) c.unload();
+        this.loaded = false;
         for (const c of this.cleanups.splice(0).reverse()) c();
         this.onunload();
       }
