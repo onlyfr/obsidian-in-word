@@ -84,6 +84,42 @@ function noop(onUse: (name: string) => void, name: string): any {
   });
 }
 
+/**
+ * Obsidian's `debounce(cb, timeout = 0, resetTimer = false)`: returns a Debouncer with `cancel()` and `run()`.
+ * With `resetTimer` every call restarts the wait; otherwise the first call in a window schedules it.
+ */
+export function debounce<A extends any[]>(cb: (...args: A) => unknown, timeout = 0, resetTimer = false) {
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  let last: A | undefined;
+  const fire = () => {
+    handle = undefined;
+    const args = last!;
+    last = undefined;
+    return cb(...args);
+  };
+  const debouncer = ((...args: A) => {
+    last = args;
+    if (handle !== undefined && resetTimer) {
+      clearTimeout(handle);
+      handle = undefined;
+    }
+    handle ??= setTimeout(fire, timeout);
+    return debouncer;
+  }) as ((...args: A) => unknown) & { cancel(): unknown; run(): unknown };
+  debouncer.cancel = () => {
+    if (handle !== undefined) clearTimeout(handle);
+    handle = undefined;
+    last = undefined;
+    return debouncer;
+  };
+  debouncer.run = () => {
+    if (handle === undefined) return;
+    clearTimeout(handle);
+    return fire();
+  };
+  return debouncer;
+}
+
 export const MATH_FALLBACK_WARNING = "수식 렌더러(Temml)를 불러오지 못해 LaTeX 소스를 텍스트로 표시합니다";
 
 const EXTERNALS: Record<string, unknown> = {
@@ -313,13 +349,7 @@ export class PluginHost {
           return new Proxy(this, { get: (t, k) => (k in t ? (t as any)[k] : () => t) });
         }
       },
-      debounce: <T extends (...a: any[]) => void>(fn: T, ms = 0) => {
-        let h: ReturnType<typeof setTimeout> | undefined;
-        return ((...a: any[]) => {
-          clearTimeout(h);
-          h = setTimeout(() => fn(...a), ms);
-        }) as T;
-      },
+      debounce,
       requireApiVersion,
       // Math: Temml (lazy chunk) renders LaTeX to MathML; falls back to the source text if it cannot be loaded.
       loadMathJax: async () => {

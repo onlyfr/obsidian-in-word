@@ -99,3 +99,30 @@ describe("win/doc and math rendering fallbacks", () => {
     expect(r.unsupportedApis).toEqual([]);
   });
 });
+
+describe("debounce (Obsidian Debouncer)", () => {
+  it("has cancel() and run(), debounces to the last arguments", async () => {
+    const { debounce } = await import("../src/plugins/host");
+    const calls: number[] = [];
+    const d = debounce((n: number) => calls.push(n), 10);
+    d(1); d(2);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([2]);
+    d(3); d.cancel();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([2]);
+    d(4); d.run();
+    expect(calls).toEqual([2, 4]);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([2, 4]);
+  });
+  it("resetTimer restarts the wait on every call", async () => {
+    const { debounce } = await import("../src/plugins/host");
+    let n = 0;
+    const d = debounce(() => n++, 30, true);
+    d(); await new Promise((r) => setTimeout(r, 20)); d(); await new Promise((r) => setTimeout(r, 20));
+    expect(n).toBe(0);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(n).toBe(1);
+  });
+});
