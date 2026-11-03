@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { htmlToMarkdown, renderWithSidecar, styleHintsFromParagraphs } from "../src/convert/obsidian";
+import { findFloatingBlocks, htmlToMarkdown, renderWithSidecar, styleHintsFromParagraphs } from "../src/convert/obsidian";
 import { MemorySidecar, pruneSidecar, sidecarFromXml, sidecarToXml } from "../src/convert/sidecar";
-import { hashId, placeholderIds } from "../src/convert/blocks";
+import { hasFloating, hashId, placeholderIds } from "../src/convert/blocks";
 
 const TABLE = '<table style="mso-yfti-tbllook:1"><tr><td colspan="2">merged</td></tr></table>';
 const wordHtml = `<html><body><p>before</p>${TABLE}<p>after</p></body></html>`;
@@ -306,5 +306,99 @@ describe("list styles round trip", () => {
     );
     expect(html).toContain('<li class="MsoListBullet">a');
     expect(html).toContain('<li class="MsoListBullet">b</li>');
+  });
+});
+
+describe("floating objects (real getHtml shapes)", () => {
+  const SQUARE =
+    '<p id=A class=MsoNormal><img width=80 height=40 src="~WRS%7bG%7d.files/image001.png" align=left hspace=12><span lang=EN-US>Intro paragraph.</span></p>';
+  const TEXTBOX =
+    '<p id=B class=MsoNormal><span style=\'position:absolute;z-index:251660288;margin-left:371px;margin-top:111px;width:161px;height:54px\'><img width=161 height=54 src="~WRS%7bG%7d.files/image002.png" alt="Text box content"></span><span lang=EN-US>Text box paragraph.</span></p>';
+  const INLINE =
+    '<p class=MsoNormal><span lang=EN-US>Inline: <img width=80 height=40 id="그림 1" src="~WRS%7bG%7d.files/image001.png"></span></p>';
+  const PLAIN_TABLE = "<table><tr><td><p>plain</p></td></tr></table>";
+  const FLOAT_TABLE =
+    "<table><tr><td><p class=MsoNormal><span style='position:absolute;z-index:1;margin-left:467px;margin-top:440px'><img width=80 height=40 src=\"~WRS%7bG%7d.files/image001.png\"></span><span>cell with floating picture</span></p></td></tr></table>";
+  const wrap = (b: string) => `<html><body><div class=WordSection1>${b}</div></body></html>`;
+  const el = (h: string) => new DOMParser().parseFromString(`<body>${h}</body>`, "text/html").body.firstElementChild!;
+
+  it("detects square-wrapped and absolutely positioned objects but not inline pictures", () => {
+    expect(hasFloating(el(SQUARE))).toBe(true);
+    expect(hasFloating(el(TEXTBOX))).toBe(true);
+    expect(hasFloating(el(FLOAT_TABLE))).toBe(true);
+    expect(hasFloating(el(INLINE))).toBe(false);
+    expect(hasFloating(el(PLAIN_TABLE))).toBe(false);
+  });
+
+  it("lists floating blocks in document order with the top-level table index", () => {
+    const blocks = findFloatingBlocks(wrap(SQUARE + INLINE + PLAIN_TABLE + FLOAT_TABLE + TEXTBOX));
+    expect(blocks).toEqual([
+      { tag: "p", text: "Intro paragraph.", tableIndex: -1 },
+      { tag: "table", text: "cell with floating picture", tableIndex: 1 },
+      { tag: "p", text: "Text box paragraph.", tableIndex: -1 },
+    ]);
+  });
+
+  it("stores OOXML for floating blocks and reports what could be preserved", () => {
+    const sc = new MemorySidecar();
+    const report = { total: 0, preserved: 0 };
+    const md = htmlToMarkdown(wrap(SQUARE + "<p>mid</p>" + TEXTBOX), sc, new Map(), [], ["OX-1", undefined], report);
+    expect(md.match(/kind=float/g)).toHaveLength(2);
+    expect(report).toEqual({ total: 2, preserved: 1 });
+    const entries = [...sc.entries()].map(([, e]) => e);
+    expect(entries.filter((e) => e.ooxml === "OX-1")).toHaveLength(1);
+    expect(entries.every((e) => !e.html.includes("~WRS"))).toBe(true);
+  });
+
+  it("renders OOXML-backed blocks as marker paragraphs in order, and lists blocks without OOXML as lost", () => {
+    const sc = new MemorySidecar();
+    sc.set("aaaaaaaa", { kind: "float", html: "<p>x</p>", ooxml: "OX-A" });
+    sc.set("bbbbbbbb", { kind: "float", html: "<p>y</p>" });
+    sc.set("cccccccc", { kind: "float", html: "<p>z</p>", ooxml: "OX-C" });
+    const md = [
+      "before",
+      "<!-- word:obj id=aaaaaaaa kind=float -->",
+      "middle",
+      "<!-- word:obj id=bbbbbbbb kind=float -->",
+      "<!-- word:obj id=cccccccc kind=float -->",
+      "after",
+    ].join("\n\n");
+    const { html, floats, lost } = renderWithSidecar(md, sc);
+    expect(floats).toEqual([
+      { marker: "OWBFLOAT0Xaaaaaaaa", ooxml: "OX-A" },
+      { marker: "OWBFLOAT1Xcccccccc", ooxml: "OX-C" },
+    ]);
+    expect(lost).toEqual(["bbbbbbbb"]);
+    const order = ["before", "OWBFLOAT0Xaaaaaaaa", "middle", "<p>y</p>", "OWBFLOAT1Xcccccccc", "after"].map((t) => html.indexOf(t));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+});
+
+describe("top-and-bottom wrapped picture (layout table hack)", () => {
+  const HACK = `<html><body><div class=WordSection1><p id=X class=MsoNormal><span
+style='position:absolute;z-index:-1;margin-left:400px;margin-top:0px'><img width=80 height=40 src="~WRS%7bG%7d.files/image001.png"></span></p>
+<p class=MsoNormal><span lang=EN-US>Before.</span></p>
+<p class=MsoNormal>
+<table cellpadding=0 cellspacing=0>
+ <tr>
+  <td width=400 height=0></td>
+ </tr>
+ <tr>
+  <td></td>
+  <td><img width=80 height=40
+  src="~WRS%7bG%7d.files/image001.png"></td>
+ </tr>
+</table>
+
+<br clear=ALL>
+<span lang=EN-US>Target paragraph.</span></p>
+<p class=MsoNormal><span lang=EN-US>Other paragraph.</span></p></div></body></html>`;
+
+  it("is detected as a floating paragraph with its own text and does not create a phantom table", () => {
+    const blocks = findFloatingBlocks(HACK);
+    expect(blocks.map((b) => b.tag)).toEqual(["p", "p"]);
+    expect(blocks[1].text).toBe("Target paragraph.");
+    expect(blocks.every((b) => b.tableIndex === -1)).toBe(true);
   });
 });

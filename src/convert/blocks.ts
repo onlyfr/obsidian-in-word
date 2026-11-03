@@ -10,11 +10,64 @@ export function hashId(s: string): string {
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
+const ABSOLUTE_RE = /position:\s*absolute/i;
+
+/** A picture that floats (anchored with wrapping): `<img align=left|right>` or inside a `position:absolute` span. */
+export function isFloatingImg(img: Element): boolean {
+  if (/^(left|right)$/i.test(img.getAttribute("align") ?? "")) return true;
+  for (let e: Element | null = img; e && e.tagName !== "BODY"; e = e.parentElement) {
+    if (ABSOLUTE_RE.test(e.getAttribute("style") ?? "")) return true;
+  }
+  return false;
+}
+
+/**
+ * True if `el` (or anything inside it) is a floating object as real Word getHtml renders them:
+ * square-wrapped pictures are `<img align=left hspace=12>`; behind/in-front pictures, text boxes and shapes are
+ * `<span style='position:absolute;z-index;margin-left;margin-top'><img alt=...></span>`.
+ */
+export function hasFloating(el: Element): boolean {
+  if (ABSOLUTE_RE.test(el.getAttribute("style") ?? "")) return true;
+  for (const d of Array.from(el.querySelectorAll("[style]"))) if (ABSOLUTE_RE.test(d.getAttribute("style") ?? "")) return true;
+  return Array.from(el.querySelectorAll("img")).some(isFloatingImg) || (el.tagName === "IMG" && isFloatingImg(el));
+}
+
+export interface FloatBlock {
+  /** "p" for a paragraph with a floating object, "table" for a (top-level) table containing one. */
+  tag: "p" | "table";
+  /** Whitespace-normalized text of the block, used to find the matching Office.js paragraph. */
+  text: string;
+  /** For tables: index among all top-level tables of the selection. */
+  tableIndex: number;
+}
+
+export const normText = (s: string) => s.replace(/[\s ]+/g, " ").trim();
+
+/** Top-level blocks that contain floating objects, in document order (same order protectOpaque consumes them). */
+export function findFloatingInDoc(doc: Document): FloatBlock[] {
+  const out: FloatBlock[] = [];
+  let tables = 0;
+  const walk = (parent: Element): void => {
+    for (const el of Array.from(parent.children)) {
+      if (el.tagName === "DIV" && /^WordSection/i.test(el.className)) {
+        walk(el);
+        continue;
+      }
+      const isTable = el.tagName === "TABLE";
+      const tableIndex = isTable ? tables++ : -1;
+      if (hasFloating(el)) out.push({ tag: isTable ? "table" : "p", text: normText(el.textContent ?? ""), tableIndex });
+    }
+  };
+  walk(doc.body);
+  return out;
+}
+
 /**
  * Decide whether a top-level block has no faithful markdown form.
  * Returns the object kind (lowercase letters only) or null if it can be edited as markdown.
  */
 export function classifyOpaque(el: Element): string | null {
+  if (hasFloating(el)) return "float";
   const tag = el.tagName.toLowerCase();
   if (tag === "table") return "table";
   if (tag === "svg" || tag === "figure" || tag === "object") return "drawing";
@@ -160,6 +213,11 @@ function buildLists(doc: Document, group: { el: Element; marker: Element }[]): v
   }
 }
 
+export interface FloatReport {
+  total: number;
+  preserved: number;
+}
+
 /** Replace opaque top-level blocks with a text token and stash their original HTML in the sidecar. */
 export function protectOpaque(
   bodyHtml: string,
@@ -167,11 +225,16 @@ export function protectOpaque(
   styleNames: Map<string, string> = new Map(),
   /** Base64 image data (document order) from Office.js; replaces the temp `~WRS...` src that getHtml emits. */
   images?: string[],
+  /** OOXML (document order, aligned with findFloatingInDoc) for blocks that contain floating objects. */
+  floatOoxml?: (string | undefined)[],
+  /** Out: how many floating blocks were found / could be preserved losslessly. */
+  report?: FloatReport,
 ): string {
   const doc = new DOMParser().parseFromString(`<body>${bodyHtml}</body>`, "text/html");
-  // Floating pictures are plain <img align=left|right> in getHtml and are not part of Office.js inlinePictures.
-  const isFloating = (img: Element) => /^(left|right)$/i.test(img.getAttribute("align") ?? "");
+  // Floating pictures are not part of Office.js inlinePictures, so only inline ones are paired with image bytes.
+  const isFloating = isFloatingImg;
   const inlineCount = Array.from(doc.body.querySelectorAll("img")).filter((i) => !isFloating(i)).length;
+  let floatIndex = 0;
   const embed = images !== undefined && images.length === inlineCount; // only trust a 1:1 match
   let imgIndex = 0;
   // Word wraps content in <div class="WordSection1">; look inside plain divs so that one table
@@ -204,7 +267,14 @@ export function protectOpaque(
         }
       }
       const html = el.outerHTML;
-      sidecar.set(id, { kind, html });
+      if (kind === "float") {
+        const ooxml = floatOoxml?.[floatIndex++];
+        if (report) {
+          report.total++;
+          if (ooxml) report.preserved++;
+        }
+        sidecar.set(id, ooxml ? { kind, html, ooxml } : { kind, html });
+      } else sidecar.set(id, { kind, html });
       const p = doc.createElement("p");
       p.textContent = `OWBOBJ${id}K${kind}END`;
       el.replaceWith(p);
