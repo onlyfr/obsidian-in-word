@@ -12,6 +12,9 @@ export function hashId(s: string): string {
 
 const ABSOLUTE_RE = /position:\s*absolute/i;
 
+/** Attribute set on a paragraph holding an equation that has no LaTeX form; value = index into the OOXML packages. */
+export const EQ_ATTR = "data-owb-eq";
+
 /** A picture that floats (anchored with wrapping): `<img align=left|right>` or inside a `position:absolute` span. */
 export function isFloatingImg(img: Element): boolean {
   if (/^(left|right)$/i.test(img.getAttribute("align") ?? "")) return true;
@@ -68,6 +71,7 @@ export function findFloatingInDoc(doc: Document): FloatBlock[] {
  */
 export function classifyOpaque(el: Element): string | null {
   if (hasFloating(el)) return "float";
+  if (el.hasAttribute(EQ_ATTR) || el.querySelector(`[${EQ_ATTR}]`)) return "equation";
   const tag = el.tagName.toLowerCase();
   if (tag === "table") return "table";
   if (tag === "svg" || tag === "figure" || tag === "object") return "drawing";
@@ -229,6 +233,8 @@ export function protectOpaque(
   floatOoxml?: (string | undefined)[],
   /** Out: how many floating blocks were found / could be preserved losslessly. */
   report?: FloatReport,
+  /** gz OOXML packages of paragraphs with unconvertible equations (indexed by the `data-owb-eq` attribute). */
+  eqPackages: { pkg: string; count: number }[] = [],
 ): string {
   const doc = new DOMParser().parseFromString(`<body>${bodyHtml}</body>`, "text/html");
   // Floating pictures are not part of Office.js inlinePictures, so only inline ones are paired with image bytes.
@@ -256,7 +262,11 @@ export function protectOpaque(
         }
         continue;
       }
-      const id = hashId(stableHtml(el.outerHTML));
+      const eqIdx = el.getAttribute(EQ_ATTR) ?? el.querySelector(`[${EQ_ATTR}]`)?.getAttribute(EQ_ATTR);
+      const stable = stableHtml(el.outerHTML)
+        .replace(new RegExp(`\\s${EQ_ATTR}="\\d+"`, "g"), "")
+        .replace(/OWBEQ\d+END/g, "OWBEQ");
+      const id = hashId(kind === "equation" ? stable + (eqPackages[Number(eqIdx)]?.pkg ?? "") : stable);
       if (images !== undefined) {
         const inner = el.tagName === "IMG" ? [el] : Array.from(el.querySelectorAll("img"));
         for (const img of inner) {
@@ -266,8 +276,11 @@ export function protectOpaque(
           if (!bytes) img.setAttribute("alt", "picture not preserved");
         }
       }
-      const html = el.outerHTML;
-      if (kind === "float") {
+      const html = el.outerHTML.replace(new RegExp(`\\s${EQ_ATTR}="\\d+"`, "g"), "");
+      if (kind === "equation") {
+        const pk = eqPackages[Number(eqIdx)];
+        sidecar.set(id, pk ? { kind, html, ooxml: pk.pkg, count: pk.count } : { kind, html });
+      } else if (kind === "float") {
         const ooxml = floatOoxml?.[floatIndex++];
         if (report) {
           report.total++;

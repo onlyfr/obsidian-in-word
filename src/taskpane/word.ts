@@ -1,5 +1,12 @@
 import { normText, placeholderIds, type FloatBlock, type FloatReport } from "../convert/blocks";
-import { findFloatingBlocks, htmlToMarkdown, renderWithSidecar, styleHintsFromParagraphs } from "../convert/obsidian";
+import {
+  findFloatingBlocks,
+  htmlToMarkdown,
+  renderWithSidecar,
+  styleHintsFromParagraphs,
+  type MathReport,
+} from "../convert/obsidian";
+import { countEquations, equationPackage, mathIds, scanOoxml, wrapPackage } from "../convert/equations";
 import {
   MemorySidecar,
   SIDECAR_NAMESPACE,
@@ -100,7 +107,11 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     const html = selection.getHtml();
     selection.paragraphs.load("items/text,items/style");
     selection.inlinePictures.load("items");
+    const selOoxml = selection.getOoxml();
     await context.sync();
+    // getHtml renders equations as bare images; their OMML comes from the OOXML (paired with the images by order).
+    const scan = scanOoxml(selOoxml.value);
+    for (const it of scan.items) if (it.kind === "eq" && it.paraXml) it.paraPkg = await gz(wrapPackage(it.paraXml));
     // getHtml references images by a temp file that is gone later; keep the real bytes in the sidecar instead.
     const pictures = selection.inlinePictures.items.map((p) => p.getBase64ImageSrc());
     await context.sync();
@@ -111,13 +122,21 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
       selection.paragraphs.items.map((p) => ({ text: p.text, style: p.style })),
     );
     const report: FloatReport = { total: 0, preserved: 0 };
-    const markdown = htmlToMarkdown(html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report);
+    const mathReport: MathReport = { total: 0, latex: 0, opaque: 0, unpaired: 0 };
+    const markdown = htmlToMarkdown(
+      html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport,
+    );
     // Keep only the objects referenced by the markdown just produced; older entries are stale.
-    await saveSidecar(context, pruneSidecar(sidecar, placeholderIds(markdown)));
+    const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown)]);
+    await saveSidecar(context, pruneSidecar(sidecar, keep));
     const notes: string[] = [];
     if (report.total) notes.push(`부동 개체 ${report.preserved}/${report.total}개 보존`);
     if (report.preserved < report.total)
       notes.push(`경고: 부동 개체 ${report.total - report.preserved}개는 보존할 수 없어 적용 시 중단됩니다`);
+    if (mathReport.total)
+      notes.push(`수식 ${mathReport.latex}/${mathReport.total}개 LaTeX로 표시` + (mathReport.opaque ? `, ${mathReport.opaque}개는 원본 보존` : ""));
+    if (mathReport.unpaired)
+      notes.push(`경고: 수식 ${mathReport.unpaired}개를 변환하지 못했습니다(표 안 등). 적용 시 중단됩니다`);
     return { markdown, notes };
   });
 }
@@ -132,7 +151,10 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 export async function replaceSelectionWithMarkdown(markdown: string): Promise<ApplyResult> {
   return Word.run(async (context) => {
     const sidecar = await loadSidecar(context);
-    const { html, missing, styled, floats, lost } = renderWithSidecar(markdown, sidecar);
+    const { html, missing, styled, floats, lost, equations, badMath, opaqueEquations } = renderWithSidecar(markdown, sidecar);
+
+    if (badMath.length)
+      throw new Error(`LaTeX를 수식으로 변환할 수 없어 적용을 중단했습니다: ${badMath[0].slice(0, 60)}`);
 
     // Safety net: never silently destroy a floating object.
     if (lost.length)
@@ -140,7 +162,14 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
         `부동 개체 ${lost.length}개의 원본을 복원할 수 없어 적용을 중단했습니다. '선택 영역 → 마크다운'으로 다시 불러오세요`,
       );
     const current = context.document.getSelection().getHtml();
+    const currentOoxml = context.document.getSelection().getOoxml();
     await context.sync();
+    const eqPresent = countEquations(currentOoxml.value);
+    if (eqPresent > equations.length + opaqueEquations)
+      throw new Error(
+        `선택 영역에 수식 ${eqPresent}개가 있지만 마크다운에는 ${equations.length + opaqueEquations}개만 있습니다. ` +
+          `적용하면 수식이 사라지므로 중단했습니다 ('선택 영역 → 마크다운'으로 다시 불러오세요)`,
+      );
     const present = findFloatingBlocks(current.value).length;
     if (present > floats.length)
       throw new Error(
@@ -151,6 +180,9 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
 
     const inserted = context.document.getSelection().insertHtml(html, Word.InsertLocation.replace);
     inserted.paragraphs.load("items/text");
+    // Inline equations are marker words inside a paragraph: locate them (display ones are whole marker paragraphs).
+    const found = equations.map((q) => (q.display ? undefined : inserted.search(q.marker, { matchCase: true })));
+    found.forEach((f) => f?.load("items"));
     await context.sync();
 
     // Everything below is one sync: every sync that changes the document is a separate Undo step.
@@ -170,6 +202,19 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       if (idx < 0) throw new Error(`부동 개체 위치를 찾을 수 없습니다 (${f.marker})`);
       ops.push(() => paras[idx].insertOoxml(ooxml[n], Word.InsertLocation.replace));
     });
+    // Equations: display ones replace their marker paragraph, inline ones replace the marker word.
+    equations.forEach((q, n) => {
+      const pkg = equationPackage(q.omml);
+      if (q.display) {
+        const idx = paras.findIndex((p) => p.text.trim() === q.marker);
+        if (idx < 0) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
+        ops.push(() => paras[idx].insertOoxml(pkg, Word.InsertLocation.replace));
+      } else {
+        const r = found[n]?.items[0];
+        if (!r) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
+        ops.push(() => r.insertOoxml(pkg, Word.InsertLocation.replace));
+      }
+    });
     if (ops.length) {
       try {
         ops.forEach((op) => op());
@@ -187,8 +232,17 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       }
     }
 
+    if (equations.length) {
+      // The fallback above swallows per-operation failures: make sure no equation marker was left behind as text.
+      const left = context.document.body.search("OWBEQ", { matchCase: true });
+      left.load("items");
+      await context.sync();
+      if (left.items.length)
+        throw new Error(`수식 ${left.items.length}개를 삽입하지 못했습니다 (Ctrl+Z로 되돌리세요)`);
+    }
+
     // Drop sidecar entries for objects that are no longer referenced by the markdown being applied.
-    await saveSidecar(context, pruneSidecar(sidecar, placeholderIds(markdown)));
+    await saveSidecar(context, pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown)])));
     return { missing };
   });
 }

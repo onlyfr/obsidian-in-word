@@ -1,7 +1,9 @@
 import MarkdownIt from "markdown-it";
 import TurndownService from "turndown";
 import {
+  EQ_ATTR,
   PLACEHOLDER_SPLIT_RE,
+  isFloatingImg,
   STYLE_MARKER_RE,
   findFloatingInDoc,
   parseStyleNames,
@@ -11,6 +13,13 @@ import {
   type FloatReport,
 } from "./blocks";
 import { MemorySidecar, type Sidecar } from "./sidecar";
+import {
+  EQ_TOKEN_RE,
+  captureMath,
+  tokenizeMath,
+  type ImgCapture,
+  type MathResolved,
+} from "./equations";
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
 
@@ -132,11 +141,29 @@ export function htmlToMarkdown(
   floatOoxml?: (string | undefined)[],
   /** Out: floating-object statistics. */
   report?: FloatReport,
+  /** Image-like objects of the selection's OOXML (see scanOoxml), used to turn equation images into LaTeX. */
+  imgCaptures?: ImgCapture[],
+  /** Out: equation statistics. */
+  mathReport?: MathReport,
 ): string {
   const styleNames = new Map([...parseStyleNames(html), ...styleNameHints]);
-  const out = tokensToPlaceholders(
-    td.turndown(protectOpaque(cleanWordHtml(html), sidecar, styleNames, images, floatOoxml, report)),
+  const tokens: MathToken[] = [];
+  const eqPackages: { pkg: string; count: number }[] = [];
+  const cleaned = replaceEquationImages(cleanWordHtml(html), imgCaptures, sidecar, tokens, eqPackages, mathReport);
+  const raw = tokensToPlaceholders(
+    td.turndown(protectOpaque(cleaned, sidecar, styleNames, images, floatOoxml, report, eqPackages)),
   );
+  // Literal dollar signs must not read as math; then put the equations in as $latex$ / $$ blocks.
+  const out = raw
+    .replace(/(```[\s\S]*?```|`[^`\n]*`|\$)/g, (m) => (m === "$" ? "\\$" : m))
+    .replace(/^OWBEQ(\d+)END[ \t]*$/gm, (m, n: string) => {
+      const t = tokens[Number(n)];
+      return t?.display ? `$$\n${t.latex}\n$$` : m;
+    })
+    .replace(EQ_TOKEN_RE, (_m, n: string) => {
+      const t = tokens[Number(n)];
+      return t.display ? `$$${t.latex}$$` : `$${t.latex}$`;
+    });
   return out
     .replace(/^(\s*)-   /gm, "$1- ") // turndown pads list items to 4 columns
     .replace(/^(\s*)(\d+\.) {2,}/gm, "$1$2 ")
@@ -146,6 +173,75 @@ export function htmlToMarkdown(
       `> [!${type}]${title ? " " + title : ""}\n`,
     )
     .trimEnd();
+}
+
+export interface MathReport {
+  /** Equations in the selection (from OOXML). */
+  total: number;
+  /** Shown as LaTeX. */
+  latex: number;
+  /** Kept as opaque `kind=equation` paragraphs (no LaTeX form). */
+  opaque: number;
+  /** Equations that could not be paired with an HTML image (counts did not match); apply will refuse. */
+  unpaired: number;
+}
+
+interface MathToken {
+  latex: string;
+  display: boolean;
+}
+
+/**
+ * getHtml turns each equation into a bare `<img>`. Pair the non-floating images with the OOXML captures by order:
+ * equations with a LaTeX form become `OWBEQnEND` text tokens, the others mark their paragraph as an opaque block.
+ */
+function replaceEquationImages(
+  html: string,
+  caps: ImgCapture[] | undefined,
+  sidecar: Sidecar,
+  tokens: MathToken[],
+  eqPackages: { pkg: string; count: number }[],
+  report?: MathReport,
+): string {
+  const eqCount = caps?.filter((c) => c.kind === "eq").length ?? 0;
+  if (report) report.total += eqCount;
+  if (!caps || !eqCount) return html;
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  const imgs = Array.from(doc.body.querySelectorAll("img")).filter((i) => !isFloatingImg(i));
+  if (imgs.length !== caps.length) {
+    if (report) report.unpaired += eqCount;
+    return html;
+  }
+  const perPara = new Map<string, number>();
+  for (const c of caps) if (c.kind === "eq") perPara.set(c.paraXml, (perPara.get(c.paraXml) ?? 0) + 1);
+  const pkgIndex = new Map<string, number>();
+  imgs.forEach((img, i) => {
+    const cap = caps[i];
+    if (cap.kind !== "eq") return;
+    if (img.closest("table")) {
+      // Equations inside tables cannot be restored separately from the (opaque) table: leave them, apply will refuse.
+      if (report) report.unpaired++;
+      return;
+    }
+    const span = img.parentElement;
+    const target = span && span.tagName === "SPAN" && span.children.length === 1 && !(span.textContent ?? "").trim() ? span : img;
+    const res = captureMath(cap, sidecar);
+    if (res) {
+      tokens.push({ latex: res.latex, display: cap.display });
+      target.replaceWith(doc.createTextNode(`OWBEQ${tokens.length - 1}END`));
+      if (report) report.latex++;
+      return;
+    }
+    const block = img.closest("p, li, h1, h2, h3, h4, h5, h6, div, td, th") ?? img;
+    if (!pkgIndex.has(cap.paraXml)) {
+      pkgIndex.set(cap.paraXml, eqPackages.length);
+      eqPackages.push({ pkg: cap.paraPkg ?? "", count: perPara.get(cap.paraXml) ?? 1 });
+      if (report) report.opaque += perPara.get(cap.paraXml) ?? 1;
+    }
+    block.setAttribute(EQ_ATTR, String(pkgIndex.get(cap.paraXml)));
+    target.remove();
+  });
+  return doc.body.innerHTML;
 }
 
 /** Blocks of `html` (getHtml output) that contain floating pictures/shapes/text boxes, in document order. */
@@ -184,6 +280,15 @@ export interface RenderResult {
   floats: { marker: string; ooxml: string }[];
   /** Floating objects whose lossless OOXML was not captured: restoring them would silently drop the object. */
   lost: string[];
+  /**
+   * Equations written as `$...$` / `$$...$$`. `html` contains each `marker` as plain text (display ones alone in their
+   * paragraph); the caller replaces it with `insertOoxml(equationPackage(omml))`.
+   */
+  equations: MathResolved[];
+  /** LaTeX that could not be converted to an equation: applying would write it as plain text, so the caller refuses. */
+  badMath: string[];
+  /** Equations inside opaque `kind=equation` paragraphs that are restored from the sidecar. */
+  opaqueEquations: number;
 }
 
 function collectStyled(chunk: string, out: { text: string; style: string }[]): void {
@@ -204,25 +309,30 @@ export function renderWithSidecar(src: string, sidecar: Sidecar): RenderResult {
   const styled: RenderResult["styled"] = [];
   const floats: RenderResult["floats"] = [];
   const lost: string[] = [];
+  const equations: MathResolved[] = [];
+  const badMath: string[] = [];
+  const usedMath = new Map<string, number>();
+  let opaqueEquations = 0;
   let html = "";
   for (let i = 0; i < parts.length; i += 3) {
-    const chunk = markdownToHtml(parts[i]);
+    const chunk = markdownToHtml(tokenizeMath(parts[i], sidecar, usedMath, equations.length, equations, badMath));
     html += chunk;
     collectStyled(chunk, styled);
     const id = parts[i + 1];
     if (id === undefined) continue;
     const entry = sidecar.get(id);
+    if (entry?.kind === "equation") opaqueEquations += entry.count ?? 1;
     if (entry?.ooxml) {
       const marker = `OWBFLOAT${floats.length}X${id}`;
       floats.push({ marker, ooxml: entry.ooxml });
       html += `<p class="MsoNormal">${marker}</p>`;
     } else if (entry) {
-      if (entry.kind === "float") lost.push(id);
+      if (entry.kind === "float" || entry.kind === "equation") lost.push(id);
       html += entry.html;
     } else {
       missing.push(id);
       html += `<p>[missing Word object ${id}]</p>`;
     }
   }
-  return { html, missing, styled, floats, lost };
+  return { html, missing, styled, floats, lost, equations, badMath, opaqueEquations };
 }
