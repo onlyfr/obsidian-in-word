@@ -2,6 +2,8 @@
 export interface SidecarEntry {
   kind: string;
   html: string;
+  /** Lossless OOXML of the block (floating objects), possibly compressed by the caller. Used instead of `html`. */
+  ooxml?: string;
 }
 
 export interface Sidecar {

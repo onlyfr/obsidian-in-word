@@ -19,11 +19,11 @@ const view = new EditorView({
 const setDoc = (text: string) =>
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
 
-async function run(label: string, fn: () => Promise<void>) {
+async function run(label: string, fn: () => Promise<string[] | void>) {
   try {
     setStatus(`${label}…`);
-    await fn();
-    setStatus(`${label} 완료`);
+    const notes = (await fn()) ?? [];
+    setStatus([`${label} 완료`, ...notes].join(" · "));
   } catch (e) {
     setStatus(`${label} 실패: ${(e as Error).message}`);
   }
@@ -35,7 +35,11 @@ Office.onReady((info) => {
     return;
   }
   document.getElementById("load")!.onclick = () =>
-    run("불러오기", async () => setDoc(await readSelectionAsMarkdown()));
+    run("불러오기", async () => {
+      const { markdown, notes } = await readSelectionAsMarkdown();
+      setDoc(markdown);
+      return notes;
+    });
   document.getElementById("apply")!.onclick = () =>
     run("적용", async () => {
       const { missing } = await replaceSelectionWithMarkdown(view.state.doc.toString());
