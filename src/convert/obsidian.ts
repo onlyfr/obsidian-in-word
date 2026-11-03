@@ -2,6 +2,7 @@ import MarkdownIt from "markdown-it";
 import TurndownService from "turndown";
 import {
   EQ_ATTR,
+  hasFloating,
   PLACEHOLDER_SPLIT_RE,
   isFloatingImg,
   STYLE_MARKER_RE,
@@ -20,6 +21,7 @@ import {
   type ImgCapture,
   type MathResolved,
 } from "./equations";
+import { TABLE_MARKER_RE, analyzeHtmlTable, buildTableOoxml, findTableBlocks, modelToLines, sameModel, tableId, tableMarker, type TableModel } from "./tables";
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
 
@@ -145,15 +147,27 @@ export function htmlToMarkdown(
   imgCaptures?: ImgCapture[],
   /** Out: equation statistics. */
   mathReport?: MathReport,
+  /** Raw OOXML (and its gz form) of the selection's top-level tables, in order (see scanTables). */
+  tableCaps?: TableCapture[],
+  /** Out: table statistics. */
+  tableReport?: TableReport,
 ): string {
   const styleNames = new Map([...parseStyleNames(html), ...styleNameHints]);
   const tokens: MathToken[] = [];
   const eqPackages: { pkg: string; count: number }[] = [];
-  const cleaned = replaceEquationImages(cleanWordHtml(html), imgCaptures, sidecar, tokens, eqPackages, mathReport);
-  const raw = tokensToPlaceholders(
+  const tableBlocks: string[] = [];
+  const cleaned = convertSimpleTables(
+    replaceEquationImages(cleanWordHtml(html), imgCaptures, sidecar, tokens, eqPackages, mathReport),
+    tableCaps,
+    sidecar,
+    tableBlocks,
+    tableReport,
+  );
+  const raw0 = tokensToPlaceholders(
     td.turndown(protectOpaque(cleaned, sidecar, styleNames, images, floatOoxml, report, eqPackages)),
   );
   // Literal dollar signs must not read as math; then put the equations in as $latex$ / $$ blocks.
+  const raw = raw0;
   const out = raw
     .replace(/(```[\s\S]*?```|`[^`\n]*`|\$)/g, (m) => (m === "$" ? "\\$" : m))
     .replace(/^OWBEQ(\d+)END[ \t]*$/gm, (m, n: string) => {
@@ -165,6 +179,7 @@ export function htmlToMarkdown(
       return t.display ? `$$${t.latex}$$` : `$${t.latex}$`;
     });
   return out
+    .replace(/^OWBTBL(\d+)END[ 	]*$/gm, (_m, n: string) => tableBlocks[Number(n)])
     .replace(/^(\s*)-   /gm, "$1- ") // turndown pads list items to 4 columns
     .replace(/^(\s*)(\d+\.) {2,}/gm, "$1$2 ")
     .replace(/\\\[\\\[(.+?)\\\]\\\]/g, "[[$1]]") // turndown escapes the brackets of plain-text [[wikilinks]]
@@ -173,6 +188,86 @@ export function htmlToMarkdown(
       `> [!${type}]${title ? " " + title : ""}\n`,
     )
     .trimEnd();
+}
+
+export interface TableCapture {
+  /** Raw top-level `<w:tbl>` markup. */
+  raw: string;
+  /** gz-encoded `raw` (stored in the sidecar). */
+  gz: string;
+}
+
+export interface TableReport {
+  total: number;
+  /** Shown as markdown tables. */
+  simple: number;
+  /** Kept as opaque `kind=table` placeholders (merged cells, nested tables, ...). */
+  opaque: number;
+  /** HTML and OOXML tables could not be paired; all stay opaque. */
+  unpaired: number;
+  /** Why tables stayed opaque (reason -> count). */
+  reasons: Record<string, number>;
+}
+
+/** Inline markdown of one table cell (same rules as paragraphs, escaped for a pipe table). */
+function cellMarkdown(inlineHtml: string): string {
+  return td
+    .turndown(`<div>${inlineHtml}</div>`)
+    .replace(/\\\[\\\[(.+?)\\\]\\\]/g, "[[$1]]") // turndown escapes the brackets of plain-text [[wikilinks]]
+    .replace(/(`[^`\n]*`|\$)/g, (m) => (m === "$" ? "\\$" : m)); // a literal $ must not read as math
+}
+
+/**
+ * Replace simple top-level tables (see analyzeHtmlTable) by `OWBTBLnEND` paragraphs; the markdown block (marker +
+ * pipe table) is put back after turndown. The original table OOXML goes into the sidecar under the marker's id.
+ */
+function convertSimpleTables(
+  html: string,
+  caps: TableCapture[] | undefined,
+  sidecar: Sidecar,
+  blocks: string[],
+  report?: TableReport,
+): string {
+  if (!caps || !caps.length) {
+    if (report) {
+      const n = (html.match(/<table/gi) ?? []).length;
+      report.total += n;
+    }
+    return html;
+  }
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  const tops: Element[] = [];
+  const walk = (parent: Element) => {
+    for (const el of Array.from(parent.children)) {
+      if (el.tagName === "DIV" && /^WordSection/i.test(el.className)) walk(el);
+      else if (el.tagName === "TABLE") tops.push(el);
+    }
+  };
+  walk(doc.body);
+  if (report) report.total += tops.length;
+  if (tops.length !== caps.length) {
+    if (report) report.unpaired += tops.length;
+    return html;
+  }
+  const note = (reason: string) => {
+    if (!report) return;
+    report.opaque++;
+    report.reasons[reason] = (report.reasons[reason] ?? 0) + 1;
+  };
+  tops.forEach((el, i) => {
+    if (hasFloating(el)) return note("floating object");
+    const a = analyzeHtmlTable(el, cellMarkdown);
+    if (!a.simple) return note(a.reason);
+    const id = tableId(caps[i].raw);
+    const lines = modelToLines(a.model);
+    sidecar.set(id, { kind: "table", html: "", ooxml: caps[i].gz, md: lines.join("\n") });
+    blocks.push(`${tableMarker(id)}\n${lines.join("\n")}`);
+    const p = doc.createElement("p");
+    p.textContent = `OWBTBL${blocks.length - 1}END`;
+    el.replaceWith(p);
+    if (report) report.simple++;
+  });
+  return doc.body.innerHTML;
 }
 
 export interface MathReport {
@@ -289,6 +384,17 @@ export interface RenderResult {
   badMath: string[];
   /** Equations inside opaque `kind=equation` paragraphs that are restored from the sidecar. */
   opaqueEquations: number;
+  /**
+   * Markdown tables. `html` contains each `marker` as plain text alone in its paragraph; the caller replaces that
+   * paragraph with `insertOoxml(wrapPackage(ooxml))` (the original table if it was not edited).
+   */
+  tables: { marker: string; ooxml: string; edited: boolean }[];
+  /** Tables that cannot be applied without losing text (ragged rows, broken markers): the apply refuses. */
+  badTables: string[];
+  /** Normalizations the user should hear about (e.g. short rows padded). */
+  tableNotes: string[];
+  /** Top-level Word tables that stay opaque (`kind=table`, or floating blocks that are tables). */
+  opaqueTables: number;
 }
 
 function collectStyled(chunk: string, out: { text: string; style: string }[]): void {
@@ -302,8 +408,55 @@ function collectStyled(chunk: string, out: { text: string; style: string }[]): v
 }
 
 /** Markdown (with placeholders) -> HTML for Word, restoring Word-only objects from the sidecar. */
+/**
+ * Replace the markdown tables of `src` (with their marker lines) by `OWBTBLnEND` paragraphs and work out the OOXML
+ * of each: the stored original when the table text is unchanged, otherwise a rebuild (see buildTableOoxml).
+ */
+function extractTables(
+  src: string,
+  sidecar: Sidecar,
+  sources: Map<string, string>,
+  tables: RenderResult["tables"],
+  bad: string[],
+  notes: string[],
+): string {
+  const blocks = findTableBlocks(src);
+  if (!blocks.length) return src;
+  let out = "";
+  let pos = 0;
+  for (const b of blocks) {
+    out += src.slice(pos, b.start);
+    pos = b.end;
+    if (b.error === "orphan" || b.error === "separator") {
+      bad.push(`표 표지(<!-- word:table … -->) 아래에 올바른 표가 없습니다 (머리글/구분선 줄을 확인하세요)`);
+      continue;
+    }
+    if (b.error?.startsWith("ragged")) {
+      bad.push(`표의 ${b.error.split(":")[1]}번째 줄에 머리글보다 칸이 많아 글자가 사라질 수 있습니다`);
+      out += src.slice(b.start, b.end);
+      continue;
+    }
+    const entry = b.id ? sidecar.get(b.id) : undefined;
+    const raw = entry?.kind === "table" ? sources.get(b.id!) : undefined;
+    const origModel: TableModel | undefined = entry?.md ? findTableBlocks(entry.md)[0]?.model : undefined;
+    if (b.id && !raw) notes.push("원본 표를 찾지 못해 새 표로 만들었습니다 (서식 없음)");
+    const unchanged = !!raw && !!origModel && sameModel(origModel, b.model);
+    if (b.padded) notes.push(`표의 짧은 행 ${b.padded}개를 빈 칸으로 채웠습니다`);
+    const ooxml = unchanged ? raw! : buildTableOoxml(raw ?? null, b.model, origModel).xml;
+    const marker = `OWBTBL${tables.length}END`;
+    tables.push({ marker, ooxml, edited: !unchanged });
+    out += `\n\n${marker}\n\n`;
+  }
+  return out + src.slice(pos);
+}
+
 /** Markdown (with placeholders) -> HTML for Word, restoring Word-only objects from the sidecar. */
-export function renderWithSidecar(src: string, sidecar: Sidecar): RenderResult {
+export function renderWithSidecar(
+  src: string,
+  sidecar: Sidecar,
+  /** Un-gz'd original OOXML of `kind=table` sidecar entries, by id (the caller decompresses them). */
+  tableSources: Map<string, string> = new Map(),
+): RenderResult {
   const parts = src.split(PLACEHOLDER_SPLIT_RE); // [text, id, kind, text, id, kind, ...]
   const missing: string[] = [];
   const styled: RenderResult["styled"] = [];
@@ -313,15 +466,21 @@ export function renderWithSidecar(src: string, sidecar: Sidecar): RenderResult {
   const badMath: string[] = [];
   const usedMath = new Map<string, number>();
   let opaqueEquations = 0;
+  let opaqueTables = 0;
+  const tables: RenderResult["tables"] = [];
+  const badTables: string[] = [];
+  const tableNotes: string[] = [];
   let html = "";
   for (let i = 0; i < parts.length; i += 3) {
-    const chunk = markdownToHtml(tokenizeMath(parts[i], sidecar, usedMath, equations.length, equations, badMath));
+    const noTables = extractTables(parts[i], sidecar, tableSources, tables, badTables, tableNotes);
+    const chunk = markdownToHtml(tokenizeMath(noTables, sidecar, usedMath, equations.length, equations, badMath));
     html += chunk;
     collectStyled(chunk, styled);
     const id = parts[i + 1];
     if (id === undefined) continue;
     const entry = sidecar.get(id);
     if (entry?.kind === "equation") opaqueEquations += entry.count ?? 1;
+    if (entry?.kind === "table" || (entry?.kind === "float" && entry.html.startsWith("<table"))) opaqueTables++;
     if (entry?.ooxml) {
       const marker = `OWBFLOAT${floats.length}X${id}`;
       floats.push({ marker, ooxml: entry.ooxml });
@@ -334,5 +493,5 @@ export function renderWithSidecar(src: string, sidecar: Sidecar): RenderResult {
       html += `<p>[missing Word object ${id}]</p>`;
     }
   }
-  return { html, missing, styled, floats, lost, equations, badMath, opaqueEquations };
+  return { html, missing, styled, floats, lost, equations, badMath, opaqueEquations, tables, badTables, tableNotes, opaqueTables };
 }
