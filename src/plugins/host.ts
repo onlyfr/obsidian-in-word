@@ -1,0 +1,295 @@
+import * as autocomplete from "@codemirror/autocomplete";
+import * as commands from "@codemirror/commands";
+import * as language from "@codemirror/language";
+import * as lint from "@codemirror/lint";
+import * as search from "@codemirror/search";
+import * as state from "@codemirror/state";
+import * as view from "@codemirror/view";
+import * as lezerCommon from "@lezer/common";
+import * as lezerHighlight from "@lezer/highlight";
+import * as lezerLr from "@lezer/lr";
+import type { Extension } from "@codemirror/state";
+
+export interface PluginManifest {
+  id: string;
+  name: string;
+  version?: string;
+  [key: string]: unknown;
+}
+
+/** What a loaded plugin used that we do not support (so you can see why a plugin misbehaves). */
+export interface CompatReport {
+  id: string;
+  loaded: boolean;
+  error?: string;
+  unsupportedApis: string[];
+  unsupportedModules: string[];
+  editorExtensions: number;
+  commands: number;
+}
+
+export interface PluginCommand {
+  id: string;
+  name: string;
+  callback?: () => void;
+  editorCallback?: (editor: unknown, view: unknown) => void;
+  hotkeys?: { modifiers: string[]; key: string }[];
+}
+
+/** Persistence for plugin data.json (settings). */
+export interface DataStore {
+  get(pluginId: string): unknown;
+  set(pluginId: string, data: unknown): void;
+}
+
+export class MemoryDataStore implements DataStore {
+  private m = new Map<string, unknown>();
+  get(id: string) {
+    return this.m.get(id);
+  }
+  set(id: string, data: unknown) {
+    this.m.set(id, data);
+  }
+}
+
+/** Any property we do not implement returns a callable no-op and is recorded. */
+function noop(onUse: (name: string) => void, name: string): any {
+  const fn = function () {};
+  return new Proxy(fn, {
+    get: (_t, key) => {
+      if (key === "then" || typeof key === "symbol") return key === Symbol.toPrimitive ? () => "" : undefined;
+      onUse(`${name}.${String(key)}`);
+      return noop(onUse, `${name}.${String(key)}`);
+    },
+    apply: () => undefined,
+    construct: () => noop(onUse, name),
+  });
+}
+
+const EXTERNALS: Record<string, unknown> = {
+  "@codemirror/autocomplete": autocomplete,
+  "@codemirror/commands": commands,
+  "@codemirror/language": language,
+  "@codemirror/lint": lint,
+  "@codemirror/search": search,
+  "@codemirror/state": state,
+  "@codemirror/view": view,
+  "@lezer/common": lezerCommon,
+  "@lezer/highlight": lezerHighlight,
+  "@lezer/lr": lezerLr,
+};
+
+export class PluginHost {
+  readonly reports = new Map<string, CompatReport>();
+  private readonly extensionsById = new Map<string, Extension[]>();
+  private readonly commandsById = new Map<string, PluginCommand[]>();
+  private readonly instances = new Map<string, { unload(): void }>();
+  onChange: () => void = () => {};
+
+  constructor(
+    private readonly store: DataStore = new MemoryDataStore(),
+    private readonly notify: (message: string) => void = () => {},
+  ) {}
+
+  /** All editor extensions registered by loaded plugins, to feed a CM6 Compartment. */
+  extensions(): Extension[] {
+    return [...this.extensionsById.values()].flat();
+  }
+
+  commands(): PluginCommand[] {
+    return [...this.commandsById.values()].flat();
+  }
+
+  private makeObsidian(report: CompatReport, manifest: PluginManifest) {
+    const use = (n: string) => {
+      if (!report.unsupportedApis.includes(n)) report.unsupportedApis.push(n);
+    };
+    const host = this;
+
+    class Component {
+      private cleanups: (() => void)[] = [];
+      onload(): void | Promise<void> {}
+      onunload(): void {}
+      register(cb: () => void) {
+        this.cleanups.push(cb);
+      }
+      registerEvent(_ref: unknown) {}
+      registerDomEvent(el: EventTarget, type: string, cb: any, opts?: any) {
+        el.addEventListener(type, cb, opts);
+        this.cleanups.push(() => el.removeEventListener(type, cb, opts));
+      }
+      registerInterval(id: number) {
+        this.cleanups.push(() => clearInterval(id));
+        return id;
+      }
+      unload() {
+        for (const c of this.cleanups.splice(0).reverse()) c();
+        this.onunload();
+      }
+    }
+
+    class Plugin extends Component {
+      app: unknown;
+      manifest: PluginManifest;
+      constructor(app: unknown, m: PluginManifest) {
+        super();
+        this.app = app;
+        this.manifest = m;
+      }
+      async loadData() {
+        return host.store.get(manifest.id) ?? null;
+      }
+      async saveData(data: unknown) {
+        host.store.set(manifest.id, data);
+      }
+      registerEditorExtension(ext: Extension) {
+        host.extensionsById.get(manifest.id)!.push(ext);
+        report.editorExtensions++;
+        host.onChange();
+      }
+      addCommand(cmd: PluginCommand) {
+        host.commandsById.get(manifest.id)!.push({ ...cmd, id: `${manifest.id}:${cmd.id}` });
+        report.commands++;
+        return cmd;
+      }
+      addSettingTab() {}
+      addRibbonIcon() {
+        return document.createElement("div");
+      }
+      addStatusBarItem() {
+        return document.createElement("div");
+      }
+      registerMarkdownPostProcessor() {
+        use("Plugin.registerMarkdownPostProcessor");
+      }
+      registerMarkdownCodeBlockProcessor() {
+        use("Plugin.registerMarkdownCodeBlockProcessor");
+      }
+      registerView() {
+        use("Plugin.registerView");
+      }
+      registerObsidianProtocolHandler() {
+        use("Plugin.registerObsidianProtocolHandler");
+      }
+    }
+
+    class Notice {
+      constructor(message: string) {
+        host.notify(String(message));
+      }
+      setMessage() {}
+      hide() {}
+    }
+
+    // Minimal, single-document stand-in for Obsidian's App.
+    const app = noop(use, "app");
+    const appShim = new Proxy(
+      {
+        workspace: new Proxy(
+          {
+            on: () => ({}),
+            off: () => {},
+            onLayoutReady: (cb: () => void) => cb(),
+            getActiveViewOfType: () => null,
+            getActiveFile: () => null,
+            trigger: () => {},
+          } as Record<string, unknown>,
+          { get: (t, k) => (k in t ? t[k as string] : (use(`app.workspace.${String(k)}`), undefined)) },
+        ),
+        vault: new Proxy(
+          { on: () => ({}), getAbstractFileByPath: () => null, getMarkdownFiles: () => [], adapter: noop(use, "app.vault.adapter") } as Record<string, unknown>,
+          { get: (t, k) => (k in t ? t[k as string] : (use(`app.vault.${String(k)}`), undefined)) },
+        ),
+        metadataCache: { on: () => ({}), getFileCache: () => null },
+      } as Record<string, unknown>,
+      { get: (t, k) => (k in t ? t[k as string] : (typeof k === "string" ? use(`app.${k}`) : 0, (app as any)[k])) },
+    );
+
+    const mod: Record<string, unknown> = {
+      __esModule: true,
+      Component,
+      Plugin,
+      Notice,
+      Platform: { isDesktop: true, isMobile: false, isMacOS: /Mac/.test(navigator.platform), isWin: /Win/.test(navigator.platform) },
+      PluginSettingTab: class {},
+      Modal: class {},
+      Setting: class {
+        constructor() {
+          return new Proxy(this, { get: (t, k) => (k in t ? (t as any)[k] : () => t) });
+        }
+      },
+      debounce: <T extends (...a: any[]) => void>(fn: T, ms = 0) => {
+        let h: ReturnType<typeof setTimeout> | undefined;
+        return ((...a: any[]) => {
+          clearTimeout(h);
+          h = setTimeout(() => fn(...a), ms);
+        }) as T;
+      },
+      normalizePath: (p: string) => p.replace(/\\/g, "/").replace(/\/+/g, "/"),
+    };
+    const obsidian = new Proxy(mod, {
+      get: (t, k) => {
+        if (k in t) return t[k as string];
+        if (typeof k !== "string" || k === "default" || k === "then") return undefined;
+        use(`obsidian.${k}`);
+        return noop(use, `obsidian.${k}`);
+      },
+    });
+    return { obsidian, appShim };
+  }
+
+  /** Load a plugin from its manifest.json and main.js source. Never throws; see the returned report. */
+  async load(manifest: PluginManifest, mainJs: string, stylesCss?: string): Promise<CompatReport> {
+    const report: CompatReport = {
+      id: manifest.id,
+      loaded: false,
+      unsupportedApis: [],
+      unsupportedModules: [],
+      editorExtensions: 0,
+      commands: 0,
+    };
+    this.reports.set(manifest.id, report);
+    this.unload(manifest.id);
+    this.reports.set(manifest.id, report);
+    this.extensionsById.set(manifest.id, []);
+    this.commandsById.set(manifest.id, []);
+    try {
+      const { obsidian, appShim } = this.makeObsidian(report, manifest);
+      const req = (name: string) => {
+        if (name === "obsidian") return obsidian;
+        if (name in EXTERNALS) return EXTERNALS[name];
+        if (!report.unsupportedModules.includes(name)) report.unsupportedModules.push(name);
+        return noop((n) => report.unsupportedApis.push(n), name);
+      };
+      const module = { exports: {} as any };
+      new Function("module", "exports", "require", mainJs)(module, module.exports, req);
+      const Ctor = typeof module.exports === "function" ? module.exports : module.exports.default;
+      if (typeof Ctor !== "function") throw new Error("main.js does not export a Plugin class");
+      const plugin = new Ctor(appShim, manifest);
+      await plugin.onload();
+      this.instances.set(manifest.id, plugin);
+      if (stylesCss) {
+        const el = document.createElement("style");
+        el.dataset.plugin = manifest.id;
+        el.textContent = stylesCss;
+        document.head.append(el);
+      }
+      report.loaded = true;
+    } catch (e) {
+      report.error = (e as Error).message;
+      this.extensionsById.delete(manifest.id);
+      this.commandsById.delete(manifest.id);
+    }
+    this.onChange();
+    return report;
+  }
+
+  unload(id: string): void {
+    this.instances.get(id)?.unload();
+    this.instances.delete(id);
+    this.extensionsById.delete(id);
+    this.commandsById.delete(id);
+    document.querySelectorAll(`style[data-plugin="${CSS.escape(id)}"]`).forEach((n) => n.remove());
+    this.onChange();
+  }
+}
