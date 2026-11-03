@@ -5,8 +5,14 @@ import {
   renderWithSidecar,
   styleHintsFromParagraphs,
   type MathReport,
+  type TableReport,
 } from "../convert/obsidian";
 import { countEquations, equationPackage, mathIds, scanOoxml, wrapPackage } from "../convert/equations";
+import { TABLE_MARKER_RE, countTables, scanTables, tableRels } from "../convert/tables";
+
+/** Sidecar ids of the markdown tables (`<!-- word:table id=... -->`). */
+const tableIds = (markdown: string) =>
+  new Set(markdown.split("\n").map((l) => TABLE_MARKER_RE.exec(l)?.[1]).filter((x): x is string => !!x));
 import {
   MemorySidecar,
   SIDECAR_NAMESPACE,
@@ -123,11 +129,13 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     );
     const report: FloatReport = { total: 0, preserved: 0 };
     const mathReport: MathReport = { total: 0, latex: 0, opaque: 0, unpaired: 0 };
+    const tableReport: TableReport = { total: 0, simple: 0, opaque: 0, unpaired: 0, reasons: {} };
+    const tableCaps = await Promise.all(scanTables(selOoxml.value).map(async (raw) => ({ raw, gz: await gz(raw), rels: tableRels(raw, selOoxml.value) })));
     const markdown = htmlToMarkdown(
-      html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport,
+      html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport,
     );
     // Keep only the objects referenced by the markdown just produced; older entries are stale.
-    const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown)]);
+    const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown), ...tableIds(markdown)]);
     await saveSidecar(context, pruneSidecar(sidecar, keep));
     const notes: string[] = [];
     if (report.total) notes.push(`부동 개체 ${report.preserved}/${report.total}개 보존`);
@@ -135,6 +143,12 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
       notes.push(`경고: 부동 개체 ${report.total - report.preserved}개는 보존할 수 없어 적용 시 중단됩니다`);
     if (mathReport.total)
       notes.push(`수식 ${mathReport.latex}/${mathReport.total}개 LaTeX로 표시` + (mathReport.opaque ? `, ${mathReport.opaque}개는 원본 보존` : ""));
+    if (tableReport.total)
+      notes.push(
+        `표 ${tableReport.simple}/${tableReport.total}개 마크다운 표로 표시` +
+          (tableReport.opaque ? `, ${tableReport.opaque}개는 원본 보존(${Object.entries(tableReport.reasons).map(([k, v]) => `${k} ${v}`).join(", ")})` : ""),
+      );
+    if (tableReport.unpaired) notes.push(`경고: 표 ${tableReport.unpaired}개를 HTML/OOXML과 짝지을 수 없어 원본 그대로 보존합니다`);
     if (mathReport.unpaired)
       notes.push(`경고: 수식 ${mathReport.unpaired}개를 변환하지 못했습니다(표 안 등). 적용 시 중단됩니다`);
     return { markdown, notes };
@@ -143,6 +157,8 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
 
 export interface ApplyResult {
   missing: string[];
+  /** Normalizations worth telling the user about. */
+  notes: string[];
 }
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -151,7 +167,16 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 export async function replaceSelectionWithMarkdown(markdown: string): Promise<ApplyResult> {
   return Word.run(async (context) => {
     const sidecar = await loadSidecar(context);
-    const { html, missing, styled, floats, lost, equations, badMath, opaqueEquations } = renderWithSidecar(markdown, sidecar);
+    // Original OOXML of the tables the markdown refers to (stored gz-compressed in the sidecar).
+    const tableSources = new Map<string, { raw: string; rels?: string }>();
+    for (const id of tableIds(markdown)) {
+      const e = sidecar.get(id);
+      if (e?.kind === "table" && e.ooxml) tableSources.set(id, { raw: await ungz(e.ooxml), rels: e.rels });
+    }
+    const { html, missing, styled, floats, lost, equations, badMath, opaqueEquations, tables, badTables, tableNotes, opaqueTables } =
+      renderWithSidecar(markdown, sidecar, tableSources);
+
+    if (badTables.length) throw new Error(`표를 적용할 수 없어 중단했습니다: ${badTables[0]}`);
 
     if (badMath.length)
       throw new Error(`LaTeX를 수식으로 변환할 수 없어 적용을 중단했습니다: ${badMath[0].slice(0, 60)}`);
@@ -164,6 +189,12 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
     const current = context.document.getSelection().getHtml();
     const currentOoxml = context.document.getSelection().getOoxml();
     await context.sync();
+    const tablesPresent = countTables(currentOoxml.value);
+    if (tablesPresent > tables.length + opaqueTables)
+      throw new Error(
+        `선택 영역에 표 ${tablesPresent}개가 있지만 마크다운에는 ${tables.length + opaqueTables}개만 있습니다. ` +
+          `적용하면 표가 사라지므로 중단했습니다 (표 줄이나 <!-- word:obj … kind=table --> 줄을 지우지 마세요)`,
+      );
     const eqPresent = countEquations(currentOoxml.value);
     if (eqPresent > equations.length + opaqueEquations)
       throw new Error(
@@ -202,6 +233,17 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       if (idx < 0) throw new Error(`부동 개체 위치를 찾을 수 없습니다 (${f.marker})`);
       ops.push(() => paras[idx].insertOoxml(ooxml[n], Word.InsertLocation.replace));
     });
+    // Tables: each replaces its marker paragraph (the original table, or one rebuilt from the markdown).
+    tables.forEach((t) => {
+      const idx = paras.findIndex((p) => p.text.trim() === t.marker);
+      if (idx < 0) throw new Error(`표 위치를 찾을 수 없습니다 (${t.marker})`);
+      const tp = wrapPackage(t.ooxml, t.rels);
+      ops.push(() => paras[idx].insertOoxml(tp, Word.InsertLocation.replace));
+      // insertOoxml leaves the marker paragraph behind as an empty paragraph after the table. Drop it when ordinary
+      // text follows (a table needs some paragraph after it, and two tables need one between them: those stay).
+      const next = paras[idx + 1];
+      if (next && !/^OWB(?:TBL|EQ|FLOAT)\d/.test(next.text.trim())) ops.push(() => next.getPrevious().delete());
+    });
     // Equations: display ones replace their marker paragraph, inline ones replace the marker word.
     equations.forEach((q, n) => {
       const pkg = equationPackage(q.omml);
@@ -232,17 +274,21 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       }
     }
 
-    if (equations.length) {
-      // The fallback above swallows per-operation failures: make sure no equation marker was left behind as text.
+    if (equations.length || tables.length) {
+      // The fallback above swallows per-operation failures: make sure no marker was left behind as text.
       const left = context.document.body.search("OWBEQ", { matchCase: true });
+      const leftT = context.document.body.search("OWBTBL", { matchCase: true });
       left.load("items");
+      leftT.load("items");
       await context.sync();
       if (left.items.length)
         throw new Error(`수식 ${left.items.length}개를 삽입하지 못했습니다 (Ctrl+Z로 되돌리세요)`);
+      if (leftT.items.length)
+        throw new Error(`표 ${leftT.items.length}개를 삽입하지 못했습니다 (Ctrl+Z로 되돌리세요)`);
     }
 
     // Drop sidecar entries for objects that are no longer referenced by the markdown being applied.
-    await saveSidecar(context, pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown)])));
-    return { missing };
+    await saveSidecar(context, pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown), ...tableIds(markdown)])));
+    return { missing, notes: tableNotes };
   });
 }

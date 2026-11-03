@@ -61,7 +61,7 @@ export function scanOoxml(ooxml: string): OoxmlScan {
 export const countEquations = (ooxml: string) => scanOoxml(ooxml).equations;
 
 /** Flat-OPC package holding just `bodyXml`, accepted by `insertOoxml`. */
-export function wrapPackage(bodyXml: string): string {
+export function wrapPackage(bodyXml: string, rels = ""): string {
   return (
     '<pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage">' +
     '<pkg:part pkg:name="/_rels/.rels" pkg:contentType="application/vnd.openxmlformats-package.relationships+xml">' +
@@ -69,7 +69,12 @@ export function wrapPackage(bodyXml: string): string {
     '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
     "</Relationships></pkg:xmlData></pkg:part>" +
     '<pkg:part pkg:name="/word/document.xml" pkg:contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml">' +
-    `<pkg:xmlData><w:document ${OMML_PKG_NAMESPACES}><w:body>${bodyXml}</w:body></w:document></pkg:xmlData></pkg:part></pkg:package>`
+    `<pkg:xmlData><w:document ${OMML_PKG_NAMESPACES}><w:body>${bodyXml}</w:body></w:document></pkg:xmlData></pkg:part>` +
+    (rels
+      ? '<pkg:part pkg:name="/word/_rels/document.xml.rels" pkg:contentType="application/vnd.openxmlformats-package.relationships+xml">' +
+        `<pkg:xmlData><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships></pkg:xmlData></pkg:part>`
+      : "") +
+    "</pkg:package>"
   );
 }
 

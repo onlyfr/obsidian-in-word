@@ -11,6 +11,10 @@ export interface SidecarEntry {
   alts?: string[];
   /** kind "equation": number of equations inside the opaque paragraph. */
   count?: number;
+  /** kind "table": the markdown table (lines) as shown at load; ooxml holds the original table. */
+  md?: string;
+  /** kind "table": the `<Relationship>` elements (hyperlinks) the original table's markup refers to. */
+  rels?: string;
 }
 
 export interface Sidecar {
