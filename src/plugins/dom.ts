@@ -51,6 +51,12 @@ export function installObsidianDom(): void {
     cb?.(el);
     return el;
   });
+  // `node.win` / `node.doc`: the window/document a node lives in (multi-window aware in Obsidian).
+  for (const [name, get] of [
+    ["win", function (this: Node) { return this.ownerDocument?.defaultView ?? window; }],
+    ["doc", function (this: Node) { return this.ownerDocument ?? document; }],
+  ] as const)
+    if (!(name in Node.prototype)) Object.defineProperty(Node.prototype, name, { get, configurable: true, enumerable: false });
   const N = Node.prototype;
   def(N, "createEl", function (this: Node, tag: any, o?: any, cb?: any) {
     const info = typeof o === "string" ? { cls: o } : { ...(o ?? {}) };

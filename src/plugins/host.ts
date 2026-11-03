@@ -316,6 +316,17 @@ export class PluginHost {
         }) as T;
       },
       requireApiVersion,
+      // No MathJax in the task pane: previews fall back to the LaTeX source as text.
+      loadMathJax: async () => {},
+      renderMath: (source: string, display: boolean) => {
+        const el = document.createElement("span");
+        el.className = display ? "math math-block" : "math math-inline";
+        el.textContent = source;
+        return el;
+      },
+      finishRenderMath: async () => {},
+      addIcon: () => {},
+      setIcon: () => {},
       editorLivePreviewField: host.livePreviewField,
       editorInfoField: host.infoField,
       apiVersion: "1.8.0",
