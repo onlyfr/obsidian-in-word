@@ -9,8 +9,14 @@ describe("markdown -> html", () => {
     expect(html).toContain("<em>italic</em>");
   });
 
-  it("turns wikilinks into marked links", () => {
-    expect(markdownToHtml("see [[Note A]] and [[Note B|alias]]")).toContain('href="wikilink:Note%20A"');
+  it("keeps wikilinks as literal text (no fake hyperlink)", () => {
+    const html = markdownToHtml("see [[Note A]] and [[Note B|alias]]");
+    expect(html).toContain("[[Note A]] and [[Note B|alias]]");
+    expect(html).not.toContain("<a ");
+  });
+
+  it("marks plain paragraphs as Word's Normal style instead of Normal (Web)", () => {
+    expect(markdownToHtml("hello")).toContain('<p class="MsoNormal">hello</p>');
   });
 });
 

@@ -33,6 +33,29 @@ export function classifyOpaque(el: Element): string | null {
 }
 
 const TOKEN_RE = /^OWBOBJ([0-9a-f]{8})K([a-z]+)END$/gm;
+const STYLE_TOKEN_RE = /^OWBSTYLE([0-9a-f]*)N([0-9a-f]*)END$/gm;
+/** `<!-- word:style class=a3 name=%EB%B3%B8... -->`: the Word paragraph style of the next paragraph. */
+export const STYLE_MARKER_RE = /^<!-- word:style class=([\w-]+) name=(\S+) -->\s*$/;
+
+const toHex = (s: string) => Array.from(new TextEncoder().encode(s), (b) => b.toString(16).padStart(2, "0")).join("");
+const fromHex = (h: string) => new TextDecoder().decode(Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16)));
+
+export const styleMarker = (cls: string, name: string) =>
+  `<!-- word:style class=${cls} name=${encodeURIComponent(name)} -->`;
+
+/** Map CSS class -> Word style name from the `<style>` block of Word's getHtml output (`mso-style-name`). */
+export function parseStyleNames(html: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const m of html.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const name = /mso-style-name:\s*"?([^";]+?)"?\s*(?:;|$)/.exec(m[2])?.[1];
+    if (!name) continue;
+    for (const c of m[1].matchAll(/\.([\w-]+)/g)) map.set(c[1], name);
+  }
+  return map;
+}
+
+/** Paragraph classes that need no marker: Word's default style and list paragraphs (turned into md lists). */
+const isDefaultParagraphClass = (cls: string) => cls === "" || cls === "MsoNormal" || cls.startsWith("MsoList");
 export const PLACEHOLDER_SPLIT_RE = /^<!-- word:obj id=([0-9a-f]{8}) kind=([a-z]+) -->[ \t]*$/m;
 
 /**
@@ -67,7 +90,7 @@ function normalizeLists(parent: Element): void {
 }
 
 /** Replace opaque top-level blocks with a text token and stash their original HTML in the sidecar. */
-export function protectOpaque(bodyHtml: string, sidecar: Sidecar): string {
+export function protectOpaque(bodyHtml: string, sidecar: Sidecar, styleNames: Map<string, string> = new Map()): string {
   const doc = new DOMParser().parseFromString(`<body>${bodyHtml}</body>`, "text/html");
   // Word wraps content in <div class="WordSection1">; look inside plain divs so that one table
   // does not make the whole section opaque.
@@ -79,7 +102,15 @@ export function protectOpaque(bodyHtml: string, sidecar: Sidecar): string {
         continue;
       }
       const kind = classifyOpaque(el);
-      if (!kind) continue;
+      if (!kind) {
+        const cls = el.tagName === "P" ? el.className.trim() : "";
+        if (cls && !isDefaultParagraphClass(cls) && /^[\w-]+$/.test(cls)) {
+          const marker = doc.createElement("p");
+          marker.textContent = `OWBSTYLE${toHex(cls)}N${toHex(styleNames.get(cls) ?? cls)}END`;
+          el.before(marker);
+        }
+        continue;
+      }
       const html = el.outerHTML;
       const id = hashId(html);
       sidecar.set(id, { kind, html });
@@ -94,5 +125,7 @@ export function protectOpaque(bodyHtml: string, sidecar: Sidecar): string {
 
 /** Turn the tokens that survived HTML->markdown conversion into visible placeholder comments. */
 export function tokensToPlaceholders(md: string): string {
-  return md.replace(TOKEN_RE, (_m, id: string, kind: string) => `<!-- word:obj id=${id} kind=${kind} -->`);
+  return md
+    .replace(TOKEN_RE, (_m, id: string, kind: string) => `<!-- word:obj id=${id} kind=${kind} -->`)
+    .replace(STYLE_TOKEN_RE, (_m, cls: string, name: string) => styleMarker(fromHex(cls), fromHex(name)));
 }

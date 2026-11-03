@@ -111,3 +111,44 @@ describe("real Word getHtml quirks", () => {
     expect(md).toContain("See [[Some Note]] and [[Other|alias]].");
   });
 });
+
+describe("paragraph styles", () => {
+  const word = `<html><head><style>
+    p.MsoNormal, li.MsoNormal {mso-style-name:"표준";}
+    p.a3, li.a3, div.a3 {mso-style-name:"본문 들여쓰기"; margin-left:20pt;}
+  </style></head><body>
+    <h1>Title</h1>
+    <p class=MsoNormal>plain</p>
+    <p class=a3>indented text</p>
+    <p class=MsoQuote>quoted</p>
+  </body></html>`;
+
+  it("emits a style marker only for non-default paragraph styles", () => {
+    const md = htmlToMarkdown(word);
+    expect(md).toContain("<!-- word:style class=a3 name=%EB%B3%B8%EB%AC%B8%20%EB%93%A4%EC%97%AC%EC%93%B0%EA%B8%B0 -->\nindented text");
+    expect(md).toContain("<!-- word:style class=MsoQuote name=MsoQuote -->\nquoted");
+    expect(md).not.toMatch(/word:style class=MsoNormal/);
+    expect(md).toContain("# Title");
+  });
+
+  it("restores the style class and mso-style-name on apply", () => {
+    const { html } = renderWithSidecar(htmlToMarkdown(word), new MemorySidecar());
+    expect(html).toContain('<p class="a3">indented text</p>');
+    expect(html).toContain('mso-style-name:"본문 들여쓰기"');
+    expect(html).toContain('<p class="MsoNormal">plain</p>');
+    expect(html).toContain('<p class="MsoQuote">quoted</p>');
+  });
+
+  it("a style marker does not leak to the following paragraph", () => {
+    const md = "<!-- word:style class=a3 name=X -->\nfirst\n\nsecond";
+    const { html } = renderWithSidecar(md, new MemorySidecar());
+    expect(html).toContain('<p class="a3">first</p>');
+    expect(html).toContain('<p class="MsoNormal">second</p>');
+  });
+
+  it("round-trips wikilinks as plain text", () => {
+    const md = htmlToMarkdown("<body><p>see [[Some Note]] and [[A|b]]</p></body>");
+    expect(md).toBe("see [[Some Note]] and [[A|b]]");
+    expect(htmlToMarkdown(renderWithSidecar(md, new MemorySidecar()).html)).toBe(md);
+  });
+});
