@@ -20,3 +20,12 @@
 - Word 본문에 직접 타이핑할 때는 키 입력을 가로챌 수 없으므로 플러그인은 **작업창 에디터 안에서만** 동작한다.
 - 플러그인은 내려받은 JS를 애드인 출처에서 그대로 실행한다(Office.js 접근 가능). 신뢰하는 플러그인만 불러오도록 UI에서 경고한다.
 - 이 저장소는 플러그인 코드를 포함하거나 재배포하지 않는다. 사용자가 직접 파일을 불러온다.
+
+## Verified against a real plugin (Latex Suite 1.14.1)
+
+Loading it in the real Word task pane needed these generic shims (all covered by `tests/compat.test.ts`):
+`window.confirm` is unsupported in Word's WebView (replaced by an inline confirmation), `requireApiVersion`,
+a minimal `window.i18next`, `activeDocument`/`activeWindow`, Obsidian's prototype extensions (`String#contains`, ...),
+DOM helpers (`createEl`, `createDiv`, `el.addClass`, `el.empty`, `node.win`, ...), the `editorLivePreviewField`
+(always source mode) and `editorInfoField` state fields, `renderMath`/`loadMathJax` fallbacks (LaTeX source as text).
+Not available: MathJax rendering, live-preview conceal, vim integration, files/vault access.
