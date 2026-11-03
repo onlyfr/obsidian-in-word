@@ -15,3 +15,24 @@ Microsoft Word 안에서 Obsidian 스타일 마크다운(위키링크, callout, 
 ## 상태
 
 초기 단계(아이디어 / PoC 준비 중)입니다.
+
+## 개발 (PoC)
+
+현재 구현: Word 작업창에 CodeMirror 6 에디터를 띄우고, 선택 영역을 마크다운으로 가져와 편집한 뒤 Word에 다시 적용합니다. 변환은 `markdown-it`(md→HTML)과 `turndown`(HTML→md)에 위키링크/callout 처리를 얹은 최소 구현입니다.
+
+```bash
+npm install
+npm test        # 변환 단위 테스트
+npm run build   # 타입체크 + 번들
+```
+
+Word에서 실행하려면 HTTPS 개발 서버와 사이드로드가 필요합니다.
+
+1. `certs/localhost.key`, `certs/localhost.crt`를 준비합니다 (예: `mkcert localhost`).
+2. `npm run dev` 로 `https://localhost:3000` 서버를 띄웁니다.
+3. `manifest.xml`을 Word에 사이드로드합니다 ([Microsoft 문서](https://learn.microsoft.com/office/dev/add-ins/testing/test-debug-office-add-ins) 참고).
+
+### 알려진 한계
+- 실제 Word에서의 동작은 아직 검증하지 못했습니다 (변환 로직만 테스트됨).
+- Word 본문에서 직접 타이핑할 때는 CM6 확장(스니펫 등)이 동작하지 않고, 작업창 에디터 안에서만 동작합니다.
+- Word 전용 객체 보존(사이드카 메타데이터), 수식(OMML↔LaTeX), 커뮤니티 확장 로딩은 아직 없습니다.
