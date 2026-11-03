@@ -81,3 +81,33 @@ describe("sidecar xml", () => {
     expect(back.get("aa")).toEqual(sc.get("aa"));
   });
 });
+
+describe("Word's WordSection wrapper", () => {
+  it("keeps non-table content editable when the section contains a table", () => {
+    const sc = new MemorySidecar();
+    const html = `<html><body><div class=WordSection1><h1>Title</h1><p class=MsoNormal>plain</p>${TABLE}<p>after</p></div></body></html>`;
+    const md = htmlToMarkdown(html, sc);
+    expect(md).toContain("# Title");
+    expect(md).toContain("plain");
+    expect(md).toContain("after");
+    expect(md).toMatch(/<!-- word:obj id=[0-9a-f]{8} kind=table -->/);
+    expect([...sc.entries()]).toHaveLength(1);
+  });
+});
+
+describe("real Word getHtml quirks", () => {
+  const LI = (cls: string, t: string) =>
+    `<p class=${cls} style='margin-left:44.0pt'><span lang=EN-US style='font-family:Wingdings'>l<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp; </span></span><span lang=EN-US>${t}</span></p>`;
+
+  it("turns MsoListBullet paragraphs into markdown list items without the Wingdings marker", () => {
+    const html = `<html><body><div class=WordSection1>${LI("MsoListBulletCxSpFirst", "one")}${LI("MsoListBulletCxSpLast", "two")}<p>after</p></div></body></html>`;
+    const md = htmlToMarkdown(html);
+    expect(md).toContain("- one\n- two");
+    expect(md).not.toMatch(/^l /m);
+  });
+
+  it("does not escape plain-text wikilinks", () => {
+    const md = htmlToMarkdown("<html><body><p>See [[Some Note]] and [[Other|alias]].</p></body></html>");
+    expect(md).toContain("See [[Some Note]] and [[Other|alias]].");
+  });
+});

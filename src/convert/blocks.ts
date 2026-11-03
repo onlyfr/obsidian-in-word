@@ -35,19 +35,60 @@ export function classifyOpaque(el: Element): string | null {
 const TOKEN_RE = /^OWBOBJ([0-9a-f]{8})K([a-z]+)END$/gm;
 export const PLACEHOLDER_SPLIT_RE = /^<!-- word:obj id=([0-9a-f]{8}) kind=([a-z]+) -->[ \t]*$/m;
 
+/**
+ * Word's getHtml renders lists as `<p class=MsoListBullet...>` with a Wingdings marker span instead of
+ * <ul>/<li>. Rebuild real lists (dropping the marker) so they convert to markdown list items.
+ */
+function normalizeLists(parent: Element): void {
+  const doc = parent.ownerDocument;
+  let cur: Element | null = null;
+  let curTag = "";
+  for (const el of Array.from(parent.children)) {
+    const m = el.tagName === "P" ? /MsoList(Bullet|Number)/.exec(el.className) : null;
+    if (!m) {
+      cur = null;
+      continue;
+    }
+    const tag = m[1] === "Number" ? "ol" : "ul";
+    const marker = Array.from(el.children).find(
+      (c) => c.tagName === "SPAN" && (/Wingdings|Symbol|mso-list:\s*Ignore/i.test(c.getAttribute("style") ?? "") || c.querySelector('span[style*="7.0pt"]')),
+    );
+    marker?.remove();
+    if (!cur || curTag !== tag) {
+      cur = doc.createElement(tag);
+      curTag = tag;
+      el.before(cur);
+    }
+    const li = doc.createElement("li");
+    li.innerHTML = el.innerHTML;
+    cur.append(li);
+    el.remove();
+  }
+}
+
 /** Replace opaque top-level blocks with a text token and stash their original HTML in the sidecar. */
 export function protectOpaque(bodyHtml: string, sidecar: Sidecar): string {
   const doc = new DOMParser().parseFromString(`<body>${bodyHtml}</body>`, "text/html");
-  for (const el of Array.from(doc.body.children)) {
-    const kind = classifyOpaque(el);
-    if (!kind) continue;
-    const html = el.outerHTML;
-    const id = hashId(html);
-    sidecar.set(id, { kind, html });
-    const p = doc.createElement("p");
-    p.textContent = `OWBOBJ${id}K${kind}END`;
-    el.replaceWith(p);
-  }
+  // Word wraps content in <div class="WordSection1">; look inside plain divs so that one table
+  // does not make the whole section opaque.
+  const walk = (parent: Element): void => {
+    normalizeLists(parent);
+    for (const el of Array.from(parent.children)) {
+      if (el.tagName === "DIV" && /^WordSection/i.test(el.className)) {
+        walk(el);
+        continue;
+      }
+      const kind = classifyOpaque(el);
+      if (!kind) continue;
+      const html = el.outerHTML;
+      const id = hashId(html);
+      sidecar.set(id, { kind, html });
+      const p = doc.createElement("p");
+      p.textContent = `OWBOBJ${id}K${kind}END`;
+      el.replaceWith(p);
+    }
+  };
+  walk(doc.body);
   return doc.body.innerHTML;
 }
 
