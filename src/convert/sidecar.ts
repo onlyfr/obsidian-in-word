@@ -23,6 +23,13 @@ export class MemorySidecar implements Sidecar {
   }
 }
 
+/** Copy of `sidecar` that keeps only the entries whose id is in `keep`. */
+export function pruneSidecar(sidecar: Sidecar, keep: Set<string>): Sidecar {
+  const out = new MemorySidecar();
+  for (const [id, entry] of sidecar.entries()) if (keep.has(id)) out.set(id, entry);
+  return out;
+}
+
 export const SIDECAR_NAMESPACE = "urn:obsidian-in-word:sidecar:v1";
 
 /**

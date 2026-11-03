@@ -60,8 +60,12 @@ export function markdownToHtml(src: string): string {
   const body = md.render(preprocessCallouts(src), env);
   const used = (env as StyleEnv).styles;
   if (!used?.size) return body;
-  const css = [...used].map(([cls, name]) => `p.${cls}{mso-style-name:"${escapeCss(name)}";}`).join("");
-  return `<style>${css}</style>${body}`;
+  // Without a real name (name === class) a style block would just create a junk style called e.g. "MsoQuote".
+  const css = [...used]
+    .filter(([cls, name]) => name !== cls)
+    .map(([cls, name]) => `p.${cls}{mso-style-name:"${escapeCss(name)}";}`)
+    .join("");
+  return css ? `<style>${css}</style>${body}` : body;
 }
 
 const td = new TurndownService({ headingStyle: "atx", bulletListMarker: "-", codeBlockStyle: "fenced" });
@@ -80,9 +84,16 @@ export function cleanWordHtml(html: string): string {
  * Word-only objects (tables, images, tracked changes, ...) become `<!-- word:obj ... -->`
  * placeholders; their original HTML is stored in `sidecar`.
  */
-export function htmlToMarkdown(html: string, sidecar: Sidecar = new MemorySidecar()): string {
-  const styleNames = parseStyleNames(html);
-  const out = tokensToPlaceholders(td.turndown(protectOpaque(cleanWordHtml(html), sidecar, styleNames)));
+export function htmlToMarkdown(
+  html: string,
+  sidecar: Sidecar = new MemorySidecar(),
+  /** class -> real Word style name (e.g. from Office.js), overriding names parsed from the HTML. */
+  styleNameHints: Map<string, string> = new Map(),
+  /** Base64 data of the selection's inline pictures, in document order. */
+  images: string[] = [],
+): string {
+  const styleNames = new Map([...parseStyleNames(html), ...styleNameHints]);
+  const out = tokensToPlaceholders(td.turndown(protectOpaque(cleanWordHtml(html), sidecar, styleNames, images)));
   return out
     .replace(/^(\s*)-   /gm, "$1- ") // turndown pads list items to 4 columns
     .replace(/\\\[\\\[(.+?)\\\]\\\]/g, "[[$1]]") // turndown escapes the brackets of plain-text [[wikilinks]]
@@ -93,19 +104,51 @@ export function htmlToMarkdown(html: string, sidecar: Sidecar = new MemorySideca
     .trimEnd();
 }
 
+const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/**
+ * Map paragraph class -> Word style name by matching the paragraphs of getHtml output with the
+ * style names Office.js reports for the same paragraphs (matched by text).
+ */
+export function styleHintsFromParagraphs(html: string, paras: { text: string; style: string }[]): Map<string, string> {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const byText = new Map(paras.map((p) => [norm(p.text), p.style]));
+  const hints = new Map<string, string>();
+  for (const p of Array.from(doc.querySelectorAll("p[class]"))) {
+    const style = byText.get(norm(p.textContent ?? ""));
+    if (style && p.className && !hints.has(p.className)) hints.set(p.className.trim(), style);
+  }
+  return hints;
+}
+
 export interface RenderResult {
   html: string;
+  /** Paragraphs that carry an explicit Word style; set via Office.js after insertHtml (which may ignore classes). */
+  styled: { text: string; style: string }[];
   /** Placeholder ids that were not found in the sidecar (object deleted or document mismatch). */
   missing: string[];
+}
+
+function collectStyled(chunk: string, out: { text: string; style: string }[]): void {
+  const doc = new DOMParser().parseFromString(chunk, "text/html");
+  const names = new Map<string, string>();
+  for (const m of chunk.matchAll(/p\.([\w-]+)\{mso-style-name:"([^"]*)";\}/g)) names.set(m[1], m[2]);
+  for (const p of Array.from(doc.body.querySelectorAll("p[class]"))) {
+    const style = names.get(p.className);
+    if (style && style !== p.className) out.push({ text: p.textContent ?? "", style });
+  }
 }
 
 /** Markdown (with placeholders) -> HTML for Word, restoring Word-only objects from the sidecar. */
 export function renderWithSidecar(src: string, sidecar: Sidecar): RenderResult {
   const parts = src.split(PLACEHOLDER_SPLIT_RE); // [text, id, kind, text, id, kind, ...]
   const missing: string[] = [];
+  const styled: RenderResult["styled"] = [];
   let html = "";
   for (let i = 0; i < parts.length; i += 3) {
-    html += markdownToHtml(parts[i]);
+    const chunk = markdownToHtml(parts[i]);
+    html += chunk;
+    collectStyled(chunk, styled);
     const id = parts[i + 1];
     if (id === undefined) continue;
     const entry = sidecar.get(id);
@@ -115,5 +158,5 @@ export function renderWithSidecar(src: string, sidecar: Sidecar): RenderResult {
       html += `<p>[missing Word object ${id}]</p>`;
     }
   }
-  return { html, missing };
+  return { html, missing, styled };
 }

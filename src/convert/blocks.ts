@@ -56,6 +56,28 @@ export function parseStyleNames(html: string): Map<string, string> {
 
 /** Paragraph classes that need no marker: Word's default style and list paragraphs (turned into md lists). */
 const isDefaultParagraphClass = (cls: string) => cls === "" || cls === "MsoNormal" || cls.startsWith("MsoList");
+/**
+ * getHtml output contains per-call noise: images get a temp name (~WRS{GUID}.files/...) and Word
+ * assigns fresh paragraph GUID ids. Strip both so an object keeps the same placeholder id across loads/applies.
+ */
+export function stableHtml(html: string): string {
+  return html
+    .replace(/~WRS%7b[0-9a-f-]+%7d/gi, "~WRS")
+    .replace(/\sid=(["']?)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\1/gi, "");
+}
+
+/** Base64 image data -> data URI (format sniffed from the magic bytes). */
+export function toDataUri(b64: string): string {
+  if (b64.startsWith("data:")) return b64;
+  const mime = b64.startsWith("/9j/") ? "image/jpeg" : b64.startsWith("R0lGOD") ? "image/gif" : "image/png";
+  return `data:${mime};base64,${b64}`;
+}
+
+/** Ids of all `<!-- word:obj id=... -->` placeholders in a markdown string. */
+export function placeholderIds(markdown: string): Set<string> {
+  return new Set(Array.from(markdown.matchAll(/<!-- word:obj id=([0-9a-f]{8}) kind=[a-z]+ -->/g), (m) => m[1]));
+}
+
 export const PLACEHOLDER_SPLIT_RE = /^<!-- word:obj id=([0-9a-f]{8}) kind=([a-z]+) -->[ \t]*$/m;
 
 /**
@@ -90,8 +112,17 @@ function normalizeLists(parent: Element): void {
 }
 
 /** Replace opaque top-level blocks with a text token and stash their original HTML in the sidecar. */
-export function protectOpaque(bodyHtml: string, sidecar: Sidecar, styleNames: Map<string, string> = new Map()): string {
+export function protectOpaque(
+  bodyHtml: string,
+  sidecar: Sidecar,
+  styleNames: Map<string, string> = new Map(),
+  /** Base64 image data (document order) from Office.js; replaces the temp `~WRS...` src that getHtml emits. */
+  images: string[] = [],
+): string {
   const doc = new DOMParser().parseFromString(`<body>${bodyHtml}</body>`, "text/html");
+  const imgs = Array.from(doc.body.querySelectorAll("img"));
+  const embed = images.length > 0 && images.length === imgs.length; // only trust a 1:1 match
+  let imgIndex = 0;
   // Word wraps content in <div class="WordSection1">; look inside plain divs so that one table
   // does not make the whole section opaque.
   const walk = (parent: Element): void => {
@@ -111,8 +142,12 @@ export function protectOpaque(bodyHtml: string, sidecar: Sidecar, styleNames: Ma
         }
         continue;
       }
+      const id = hashId(stableHtml(el.outerHTML));
+      if (embed) {
+        const inner = el.tagName === "IMG" ? [el] : Array.from(el.querySelectorAll("img"));
+        for (const img of inner) img.setAttribute("src", toDataUri(images[imgIndex++]));
+      }
       const html = el.outerHTML;
-      const id = hashId(html);
       sidecar.set(id, { kind, html });
       const p = doc.createElement("p");
       p.textContent = `OWBOBJ${id}K${kind}END`;
