@@ -54,6 +54,38 @@ export function pruneSidecar(sidecar: Sidecar, keep: Set<string>): Sidecar {
   return out;
 }
 
+/**
+ * Word writes fresh revision ids (`w:rsid*`) and paragraph ids (`w14:paraId`/`textId`) into the OOXML of every
+ * `getOoxml` call, so the same table or floating object is never byte-equal between two loads.
+ */
+export const normalizeOoxml = (x: string) =>
+  x.replace(/\s(?:w:rsid\w*|w14:paraId|w14:textId)="[^"]*"/g, "").replace(/<w:rsid(?:Root)?\s+w:val="[^"]*"\s*\/>/g, "");
+
+/**
+ * Entries of `next` that equal the stored one up to those volatile ids are replaced by the stored entry, so an
+ * unchanged document yields an unchanged sidecar (and the Custom XML Part need not be rewritten).
+ * `ungz` expands `gz:` values.
+ */
+export async function keepEquivalentEntries(
+  next: Sidecar,
+  previous: Sidecar,
+  ungz: (s: string) => Promise<string>,
+): Promise<Sidecar> {
+  const out = new MemorySidecar();
+  for (const [id, entry] of next.entries()) {
+    const old = previous.get(id);
+    let keep = false;
+    if (old && old.kind === entry.kind && old.ooxml && entry.ooxml) {
+      const { ooxml: a, ...restOld } = old;
+      const { ooxml: b, ...restNew } = entry;
+      if (JSON.stringify(restOld) === JSON.stringify(restNew))
+        keep = a === b || normalizeOoxml(await ungz(a)) === normalizeOoxml(await ungz(b));
+    }
+    out.set(id, keep ? old! : entry);
+  }
+  return out;
+}
+
 export const SIDECAR_NAMESPACE = "urn:obsidian-in-word:sidecar:v1";
 
 /**

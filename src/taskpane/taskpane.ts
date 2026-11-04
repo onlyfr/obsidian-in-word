@@ -73,5 +73,6 @@ Office.onReady((info) => {
       if (missing.length) throw new Error(`복원할 수 없는 Word 객체: ${missing.join(", ")}`);
       return [...new Set(notes)];
     });
-  setStatus("Word에서 영역을 선택하고 '선택 영역 → 마크다운' 을 누르세요.");
+  // Office.onReady usually fires after the lazy chunks have started: do not hide a load failure reported by then.
+  if (!status.textContent) setStatus("Word에서 영역을 선택하고 '선택 영역 → 마크다운' 을 누르세요.");
 });

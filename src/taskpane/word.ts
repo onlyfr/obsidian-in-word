@@ -17,6 +17,7 @@ import {
   MemorySidecar,
   SIDECAR_NAMESPACE,
   pruneSidecar,
+  keepEquivalentEntries,
   sidecarFromXml,
   sidecarToXml,
   type Sidecar,
@@ -47,7 +48,11 @@ async function loadSidecar(context: Word.RequestContext): Promise<LoadedSidecar>
  * rewriting a part with embedded pictures/OOXML is expensive and dirties the document for no reason.
  */
 async function saveSidecar(context: Word.RequestContext, sidecar: Sidecar, loaded: LoadedSidecar): Promise<void> {
-  const xml = sidecarToXml(sidecar);
+  let xml = sidecarToXml(sidecar);
+  if (xml !== loaded.before) {
+    // Word gives the same table/float new rsids on every getOoxml: entries equal up to those keep the stored version.
+    xml = sidecarToXml(await keepEquivalentEntries(sidecar, sidecarFromXml(loaded.before), ungz));
+  }
   if (xml === loaded.before && loaded.parts <= 1) return;
   const parts = context.document.customXmlParts.getByNamespace(SIDECAR_NAMESPACE);
   parts.load("items");
