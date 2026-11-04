@@ -29,5 +29,36 @@
 - **다크/라이트 무관**하게 읽히도록 배경 투명 + 글자색 자동(문서 글자색 사용) 여부를 정한다.
 - 대체 텍스트에는 LaTeX 원문(길면 잘라서)을 넣어 접근성을 확보한다.
 
+## 수식 이미지: 구현 상태 (`math-image` 브랜치)
+**구현됨 (코드 + 단위 테스트)**: 사다리 OMML → PNG 그림 → `$…$` 소스 글자, 사이드카 `kind=mathimg`, 대체 텍스트 `owb:math:<id>[:d] <LaTeX>`, 불러오기/적용/정리, 한도·시간 제한, 지연 로딩(메인 번들 +1.3 kB). 자세한 사용법은 README '수식' 참고.
+
+**래스터화 방식 측정** (같은 수식 12개, 3배 해상도, Chromium 156 = WebView2와 같은 엔진, Windows 11; 실제 Word의 WebView2(Edg/156) 안에서도 같은 코드를 17개 수식으로 재측정: 크기·기준선이 Chromium과 완전히 같고 수식당 4–7 ms, 캔버스 오염 없음, 모듈 로딩 약 47 ms):
+
+| | (a) Temml MathML → SVG `foreignObject` → canvas | (b) MathJax 3 SVG 출력 → canvas |
+|---|---|---|
+| 추가 코드 | 이미 있는 Temml(지연 청크 204 kB, gzip 60 kB) + 래스터라이저 2.8 kB | `tex-svg.js` 2.1 MB (gzip 680 kB), Apache-2.0 |
+| 로딩 | Temml+CSS+모듈 약 110 ms | 약 90–130 ms |
+| 수식당 시간 | 4–41 ms (첫 수식이 가장 느림) | 4–52 ms |
+| 캔버스 오염 | 없음 (data: URI SVG, `getImageData`/`toDataURL` 성공) | 없음 |
+| 투명 배경 | 예 (모서리 알파 0) | 예 |
+| `\cancel`, `\color`, `\boxed`, `\tag` | 모두 그려짐 | `\cancel`/`\color`는 확장 모듈을 네트워크(`//../../es5/input/tex/extensions/*.js`)에서 가져오려다 실패 (네트워크 금지 원칙 위반) |
+| 글꼴 | 시스템의 Cambria Math (Temml 기본 CSS) | 자체 경로 글꼴 |
+| PNG 크기(예: `\cfrac` 4단) | 8.8 kB | 7.8 kB |
+
+(a)를 채택: 새 의존성이 없고, 미리보기와 같은 정제된 Temml 파이프라인(스크립트·외부 요청 없음)을 쓰고, 네트워크 없이 모든 시험 수식이 그려집니다. (a)의 주의점: 글꼴이 **그리는 PC의 수학 글꼴**에 의존합니다(Windows는 Cambria Math). Mac/웹 Word에서 그리면 글꼴이 달라질 수 있지만 PNG는 만든 시점에 고정되므로 이후에는 안정적입니다.
+
+**텍스트 색 정책**: 검정(#000) 고정 + 투명 배경. 어두운 배경 문서에서는 글자가 안 보일 수 있습니다(추후 문서 글자색을 읽어 반영 가능). 글자 크기는 본문 11pt 기준이며 id에 포함하지 않습니다(다른 크기의 본문이면 상대적으로 작거나 크게 보임).
+
+**OMML 변환 불가 + Temml 가능 수식 (시험 말뭉치, `tests/mathimg.test.ts`)**: `\xrightarrow`, `\boxed`, `\cancel`/`\bcancel`, `\color`/`\textcolor`, `\operatorname*`, `\mathcal`/`\mathfrak`, `\widehat`/`\widetilde`, `\overrightarrow`, `\not`, `\stackrel`, `\substack`, `\cfrac`, `\pmod`, `\phantom`, `\fbox`/`\colorbox`, `\sideset`, `\tag`. 변환되는 것(1단계): `\underbrace`/`\overbrace`, `cases`, `aligned`, `\overset`, `\binom`, `\operatorname`. Temml도 못 그리는 것: 알 수 없는 명령, 없는 환경(`tikzpicture`, `eqnarray`), `\href`(trust 없음), `\enclose`.
+
+**실제 Word 확인 결과 (데스크톱 Word, 한국어 UI, WebView2 디버그 포트로 작업창 구동, 2026-11-04)**:
+- 삽입: `insertOoxml` + `w:position`이 먹힘(인라인 그림의 `Range.Font.Position` = −5~−14 pt, 독립 수식 0). EMF 렌더링에서 글자 기준선과 수식 기준선이 맞음. 100% 확대에서 선명.
+- 독립 수식: `insertOoxml(replace)`는 바꾸는 문단의 서식을 유지하므로 패키지 안의 `w:jc`는 버려짐 → HTML의 표지 문단을 `align=center`로 만들어 해결(5/5 가운데 정렬).
+- 대체 텍스트(`descr`)·`w:position`·사이드카가 저장 → 다시 열기 후에도 남음. 다시 연 파일의 사이드카로 불러오면 그림 15개가 `$…$`로, Word 수식 4개가 LaTeX로 나옴.
+- 한 선택 영역에 표·글머리 목록·떠 있는 그림(1/1 보존)·일반 그림·Word 수식·추적 변경(1)과 수식 그림 16개 + 소스 글자 1개를 함께 적용: 적용 약 1.2–1.7 s, 불러오기 0.2–0.7 s(멈춤 없음). 불러오기→적용→불러오기 마크다운 동일.
+- 고치지 않은 수식: 적용 전후 그림 바이트(SHA-1)가 같음. 수식 둘을 고치면(하나는 OMML로 바뀜) 새 PNG 1개만 생기고 사이드카 `mathimg`가 16 → 15로 정리됨.
+- 실행 취소: 적용 1회 = Ctrl+Z 2번으로 원상 복구(`insertHtml` 한 번 + 개체 삽입 한 번), 다시 실행하면 같은 상태.
+- 아직 안 한 것: Mac/웹 Word, 본문이 11pt가 아닌 문서의 크기 대조, 어두운 배경, WebView2에서의 래스터화 속도·글꼴 별도 측정(위 표는 Chromium 값; 실제 Word 안에서의 렌더 결과는 위처럼 정상). 표 안의 수식 그림은 풀지 못하고 적용이 중단됩니다(표 안 Word 수식과 같은 한계). 본문 글자 크기/색 반영, SVG 형식은 없음. Mermaid 등 다른 렌더러(렌더러 인터페이스 일반화)는 다음 단계.
+
 ## 구현 순서
 표 변환(완료, README '표' 참고) → 수식 이미지(OMML 불가 수식) → 렌더러 인터페이스 일반화 → Mermaid 렌더러 → 실제 Word 검증(복원 동일성, 실행 취소, 불러오기 멈춤 없음, 떠 있는 개체·수식과의 공존).

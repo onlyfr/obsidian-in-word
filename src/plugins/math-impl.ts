@@ -75,6 +75,9 @@ export function sanitizeMathML(markup: string): string {
   return doc.body.innerHTML;
 }
 
+/** The bundled font is only for \mathscr; it is never fetched. */
+const stripFontFace = (css: string) => css.replace(/@font-face\s*\{[^}]*\}/g, "");
+
 /** `\class{name}{...}` (used by plugins to mark the cursor/highlight) is the only trusted command, with a plain name. */
 const trust = (ctx: { command?: string; class?: string }) => ctx.command === "\\class" && /^[\w-]+$/.test(ctx.class ?? "");
 
@@ -98,7 +101,9 @@ export class MathRenderer {
       try {
         this.temml = await this.importer.temml();
         try {
-          this.injectCss(await this.importer.css());
+          const css = await this.importer.css();
+          this.injectCss(css);
+          this.cssText = stripFontFace(css);
         } catch {
           /* styles are optional: MathML renders without them */
         }
@@ -120,8 +125,21 @@ export class MathRenderer {
     const el = document.createElement("style");
     el.id = "owb-temml-css";
     // The bundled font is only for \mathscr; do not fetch it.
-    el.textContent = css.replace(/@font-face\s*\{[^}]*\}/g, "");
+    el.textContent = stripFontFace(css);
     document.head.append(el);
+  }
+
+  private cssText = "";
+
+  /** Temml's stylesheet without the web-font rule (for rendering MathML into a picture, see convert/mathraster.ts). */
+  get css(): string {
+    return this.cssText;
+  }
+
+  /** Sanitized MathML for `source` (or the error), once {@link load} succeeded. Never throws. */
+  mathml(source: string, display: boolean): { html?: string; err?: string } {
+    if (this.status !== "ready") return { err: "math renderer not loaded" };
+    return this.convert(source, display);
   }
 
   private convert(source: string, display: boolean): { html?: string; err?: string } {
