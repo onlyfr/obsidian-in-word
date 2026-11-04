@@ -60,7 +60,9 @@ describe("keepEquivalentEntries (an unchanged document keeps an unchanged sideca
     const prev = sc({ m1: { kind: "math", html: "", latex: "x", omml: "<m:oMath/>" }, t1: stored.get("t1")! });
     const out = await keepEquivalentEntries(fresh, prev, ungz);
     expect([...out.entries()].map(([k]) => k)).toEqual(["m1", "t1", "n1"]);
-    expect(out.get("m1")).toBe(fresh.get("m1"));
+    // An entry without OOXML that equals the stored one is also reused: that keeps its "last used" day number, so an
+    // unchanged document does not get a rewritten sidecar every day.
+    expect(out.get("m1")).toBe(prev.get("m1"));
     expect(out.get("t1")).toBe(stored.get("t1"));
     expect(out.get("n1")).toBe(fresh.get("n1"));
   });

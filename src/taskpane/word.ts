@@ -1,3 +1,4 @@
+import { leftoverChecks } from "./markers";
 import { hashId, normText, placeholderIds, type FloatBlock, type FloatReport } from "../convert/blocks";
 import {
   BLANK_TOKEN,
@@ -17,7 +18,7 @@ const tableIds = (markdown: string) =>
 import {
   MemorySidecar,
   SIDECAR_NAMESPACE,
-  pruneSidecar,
+  retainSidecar,
   keepEquivalentEntries,
   sidecarFromXml,
   sidecarToXml,
@@ -48,11 +49,20 @@ async function loadSidecar(context: Word.RequestContext): Promise<LoadedSidecar>
  * Replace the stored sidecar with `sidecar` (delete old part(s), add a fresh one). Skipped when nothing changed:
  * rewriting a part with embedded pictures/OOXML is expensive and dirties the document for no reason.
  */
-async function saveSidecar(context: Word.RequestContext, sidecar: Sidecar, loaded: LoadedSidecar): Promise<void> {
-  let xml = sidecarToXml(sidecar);
+async function saveSidecar(
+  context: Word.RequestContext,
+  sidecar: Sidecar,
+  loaded: LoadedSidecar,
+  /** Ids referenced by the markdown being loaded/applied: always retained and marked as recently used. */
+  keep: Set<string>,
+): Promise<void> {
+  // The sidecar belongs to the whole document, not to the selection: never drop what other regions may still need
+  // (see retainSidecar); only long-unused entries and entries beyond the size cap go.
+  let xml = sidecarToXml(retainSidecar(sidecar, keep));
   if (xml !== loaded.before) {
     // Word gives the same table/float new rsids on every getOoxml: entries equal up to those keep the stored version.
-    xml = sidecarToXml(await keepEquivalentEntries(sidecar, sidecarFromXml(loaded.before), ungz));
+    const merged = await keepEquivalentEntries(sidecar, sidecarFromXml(loaded.before), ungz);
+    xml = sidecarToXml(retainSidecar(merged, keep));
   }
   if (xml === loaded.before && loaded.parts <= 1) return;
   const parts = context.document.customXmlParts.getByNamespace(SIDECAR_NAMESPACE);
@@ -155,9 +165,9 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
       html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport, trailingBlanks(selection.paragraphs.items),
     );
     lastRegion = regionSignature(selection.paragraphs.items.map((p) => p.text));
-    // Keep only the objects referenced by the markdown just produced; older entries are stale.
+    // Objects referenced by the markdown just produced are marked as used; other regions' entries are left alone.
     const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]);
-    await saveSidecar(context, pruneSidecar(sidecar, keep), loaded);
+    await saveSidecar(context, sidecar, loaded, keep);
     const notes: string[] = [];
     if (report.total) notes.push(`부동 개체 ${report.preserved}/${report.total}개 보존`);
     if (report.preserved < report.total)
@@ -301,6 +311,13 @@ export async function replaceSelectionWithMarkdown(
     // Everything below is one sync: every sync that changes the document is a separate Undo step.
     const paras = inserted.paragraphs.items;
     const ops: (() => void)[] = [];
+    // Operations that put a Word-only object back (floating objects, tables, equations/pictures). If one of them
+    // fails, the apply must fail: the retry loop below may only skip optional operations (style names, selection).
+    const required = new Set<() => void>();
+    const req = (op: () => void) => {
+      required.add(op);
+      ops.push(op);
+    };
     // insertHtml may ignore class/mso-style-name (e.g. built-in Quote), so set styles explicitly by name.
     const used = new Set<number>();
     for (const spec of styled) {
@@ -313,14 +330,14 @@ export async function replaceSelectionWithMarkdown(
     floats.forEach((f, n) => {
       const idx = paras.findIndex((p) => p.text.trim() === f.marker);
       if (idx < 0) throw new Error(`부동 개체 위치를 찾을 수 없습니다 (${f.marker})`);
-      ops.push(() => paras[idx].insertOoxml(ooxml[n], Word.InsertLocation.replace));
+      req(() => paras[idx].insertOoxml(ooxml[n], Word.InsertLocation.replace));
     });
     // Tables: each replaces its marker paragraph (the original table, or one rebuilt from the markdown).
     tables.forEach((t) => {
       const idx = paras.findIndex((p) => p.text.trim() === t.marker);
       if (idx < 0) throw new Error(`표 위치를 찾을 수 없습니다 (${t.marker})`);
       const tp = wrapPackage(t.ooxml, t.rels);
-      ops.push(() => paras[idx].insertOoxml(tp, Word.InsertLocation.replace));
+      req(() => paras[idx].insertOoxml(tp, Word.InsertLocation.replace));
       // insertOoxml leaves the marker paragraph behind as an empty paragraph after the table. Drop it when ordinary
       // text follows (a table needs some paragraph after it, and two tables need one between them: those stay).
       const next = paras[idx + 1];
@@ -333,11 +350,11 @@ export async function replaceSelectionWithMarkdown(
       if (q.display) {
         const idx = paras.findIndex((p) => p.text.trim() === q.marker);
         if (idx < 0) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
-        ops.push(() => paras[idx].insertOoxml(pkg, Word.InsertLocation.replace));
+        req(() => paras[idx].insertOoxml(pkg, Word.InsertLocation.replace));
       } else {
         const r = found[n]?.items[0];
         if (!r) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
-        ops.push(() => r.insertOoxml(pkg, Word.InsertLocation.replace));
+        req(() => r.insertOoxml(pkg, Word.InsertLocation.replace));
       }
     });
     // Empty paragraphs (`<!-- word:blank -->` markers): the marker paragraphs become empty again.
@@ -349,38 +366,39 @@ export async function replaceSelectionWithMarkdown(
       const to = next.isNullObject ? context.document.body.paragraphs.getLast().getRange("Whole") : next.getRange("Start");
       from.expandTo(to).select();
     });
+    const failedRequired: string[] = [];
     if (ops.length) {
       try {
         ops.forEach((op) => op());
         await context.sync();
       } catch {
-        // an unknown style name fails the whole batch: retry one by one and skip the bad ones
+        // an unknown style name fails the whole batch: retry one by one and skip the optional ones that fail
         for (const op of ops) {
           try {
             op();
             await context.sync();
-          } catch {
-            /* keep whatever insertHtml produced */
+          } catch (e) {
+            if (required.has(op)) failedRequired.push((e as Error)?.message ?? String(e));
+            /* optional operation (style, selection): keep whatever insertHtml produced */
           }
         }
       }
     }
 
-    if (active.length || tables.length || paras.some((p) => p.text.trim() === BLANK_TOKEN)) {
-      // The fallback above swallows per-operation failures: make sure no marker was left behind as text.
-      const left = context.document.body.search("OWBEQ", { matchCase: true });
-      const leftT = context.document.body.search("OWBTBL", { matchCase: true });
-      const leftB = context.document.body.search(BLANK_TOKEN, { matchCase: true });
-      left.load("items");
-      leftT.load("items");
-      leftB.load("items");
+    // The retry above skips optional failures: make sure no marker was left behind as text and no object is missing.
+    const checks = leftoverChecks({
+      floats: floats.length,
+      equations: active.length,
+      tables: tables.length,
+      blanks: paras.some((p) => p.text.trim() === BLANK_TOKEN),
+    });
+    if (checks.length || failedRequired.length) {
+      const found = checks.map((c) => ({ c, r: context.document.body.search(c.prefix, { matchCase: true }) }));
+      found.forEach((f) => f.r.load("items"));
       await context.sync();
-      if (left.items.length)
-        throw new Error(`수식 ${left.items.length}개를 삽입하지 못했습니다 (Ctrl+Z로 되돌리세요)`);
-      if (leftT.items.length)
-        throw new Error(`표 ${leftT.items.length}개를 삽입하지 못했습니다 (Ctrl+Z로 되돌리세요)`);
-      if (leftB.items.length)
-        throw new Error(`빈 문단 ${leftB.items.length}개를 만들지 못했습니다 (Ctrl+Z로 되돌리세요)`);
+      for (const { c, r } of found) if (r.items.length) throw new Error(`${c.label} ${r.items.length}개를 ${c.action} (Ctrl+Z로 되돌리세요)`);
+      if (failedRequired.length)
+        throw new Error(`문서 개체 ${failedRequired.length}개를 삽입하지 못했습니다: ${failedRequired[0]} (Ctrl+Z로 되돌리세요)`);
     }
 
     const after = context.document.getSelection();
@@ -390,11 +408,12 @@ export async function replaceSelectionWithMarkdown(
     next.untrack();
     lastRegion = regionSignature(after.paragraphs.items.map((p) => p.text));
 
-    // Drop sidecar entries for objects that are no longer referenced by the markdown being applied.
+    // Entries referenced by the applied markdown are marked as used; other regions' entries are left alone.
     await saveSidecar(
       context,
-      pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)])),
+      sidecar,
       loaded,
+      new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]),
     );
     return { missing, notes: [...tableNotes, ...mathNotes] };
   });
