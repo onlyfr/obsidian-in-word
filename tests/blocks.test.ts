@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { findFloatingBlocks, htmlToMarkdown, renderWithSidecar, styleHintsFromParagraphs } from "../src/convert/obsidian";
 import { MemorySidecar, pruneSidecar, sidecarFromXml, sidecarToXml } from "../src/convert/sidecar";
-import { hasFloating, hashId, placeholderIds } from "../src/convert/blocks";
+import { hasFloating, hashId, parseStyleNames, placeholderIds } from "../src/convert/blocks";
 
 const TABLE = '<table style="mso-yfti-tbllook:1"><tr><td colspan="2">merged</td></tr></table>';
 const wordHtml = `<html><body><p>before</p>${TABLE}<p>after</p></body></html>`;
@@ -400,5 +400,25 @@ style='position:absolute;z-index:-1;margin-left:400px;margin-top:0px'><img width
     expect(blocks.map((b) => b.tag)).toEqual(["p", "p"]);
     expect(blocks[1].text).toBe("Target paragraph.");
     expect(blocks.every((b) => b.tableIndex === -1)).toBe(true);
+  });
+});
+
+describe("parseStyleNames", () => {
+  it("reads class -> Word style names from <style> blocks only", () => {
+    const html = `<html><head><style>
+      p.MsoNormal, li.MsoNormal {mso-style-name:"표준";}
+      p.a3, div.a3 {mso-style-name:"본문 들여쓰기"; margin-left:20pt;}
+    </style></head><body><p class=a3>x {mso-style-name:"bogus"} y</p></body></html>`;
+    const names = parseStyleNames(html);
+    expect(names.get("MsoNormal")).toBe("표준");
+    expect(names.get("a3")).toBe("본문 들여쓰기");
+    expect(names.size).toBe(2);
+  });
+
+  it("is linear on large brace-free bodies (was quadratic)", () => {
+    const body = "<p class=MsoNormal>some text without any braces at all</p>".repeat(30000); // ~1.7 MB
+    const t0 = performance.now();
+    parseStyleNames(`<html><head><style>p.a{mso-style-name:"A";}</style></head><body>${body}</body></html>`);
+    expect(performance.now() - t0).toBeLessThan(1000);
   });
 });

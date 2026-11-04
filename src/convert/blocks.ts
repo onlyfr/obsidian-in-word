@@ -103,10 +103,14 @@ export const styleMarker = (cls: string, name: string) =>
 /** Map CSS class -> Word style name from the `<style>` block of Word's getHtml output (`mso-style-name`). */
 export function parseStyleNames(html: string): Map<string, string> {
   const map = new Map<string, string>();
-  for (const m of html.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const name = /mso-style-name:\s*"?([^";]+?)"?\s*(?:;|$)/.exec(m[2])?.[1];
-    if (!name) continue;
-    for (const c of m[1].matchAll(/\.([\w-]+)/g)) map.set(c[1], name);
+  // Only look inside <style> blocks: running the rule regex over the whole document is quadratic, because every
+  // start position of a long brace-free run (i.e. all of the body text) is scanned to its end before failing.
+  for (const block of html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) {
+    for (const m of block[1].matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const name = /mso-style-name:\s*"?([^";]+?)"?\s*(?:;|$)/.exec(m[2])?.[1];
+      if (!name) continue;
+      for (const c of m[1].matchAll(/\.([\w-]+)/g)) map.set(c[1], name);
+    }
   }
   return map;
 }
