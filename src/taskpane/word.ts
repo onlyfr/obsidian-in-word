@@ -197,7 +197,6 @@ const trailingBlanks = (ps: { text: string; tableNestingLevel: number }[]) => {
   for (let i = ps.length - 1; i >= 0 && ps[i].tableNestingLevel === 0 && !ps[i].text.trim(); i--) n++;
   return n;
 };
-export const forgetRegion = () => (lastRegion = null);
 
 /** Replace the current selection in Word with the rendered markdown, restoring Word-only objects. */
 export async function replaceSelectionWithMarkdown(
