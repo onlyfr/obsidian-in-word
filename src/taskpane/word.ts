@@ -22,8 +22,16 @@ import {
   type Sidecar,
 } from "../convert/sidecar";
 
+interface LoadedSidecar {
+  sidecar: Sidecar;
+  /** Our own serialization right after loading, to detect whether anything changed before saving. */
+  before: string;
+  /** Number of stored parts: more than one is consolidated on the next save. */
+  parts: number;
+}
+
 /** Load the sidecar stored inside the document (Custom XML Part). Empty if none exists yet. */
-async function loadSidecar(context: Word.RequestContext): Promise<Sidecar> {
+async function loadSidecar(context: Word.RequestContext): Promise<LoadedSidecar> {
   const sidecar = new MemorySidecar();
   const parts = context.document.customXmlParts.getByNamespace(SIDECAR_NAMESPACE);
   parts.load("items");
@@ -31,16 +39,21 @@ async function loadSidecar(context: Word.RequestContext): Promise<Sidecar> {
   const xmls = parts.items.map((p) => p.getXml());
   await context.sync();
   for (const x of xmls) sidecarFromXml(x.value, sidecar);
-  return sidecar;
+  return { sidecar, before: sidecarToXml(sidecar), parts: parts.items.length };
 }
 
-/** Replace the stored sidecar with `sidecar` (delete old part(s), add a fresh one). */
-async function saveSidecar(context: Word.RequestContext, sidecar: Sidecar): Promise<void> {
+/**
+ * Replace the stored sidecar with `sidecar` (delete old part(s), add a fresh one). Skipped when nothing changed:
+ * rewriting a part with embedded pictures/OOXML is expensive and dirties the document for no reason.
+ */
+async function saveSidecar(context: Word.RequestContext, sidecar: Sidecar, loaded: LoadedSidecar): Promise<void> {
+  const xml = sidecarToXml(sidecar);
+  if (xml === loaded.before && loaded.parts <= 1) return;
   const parts = context.document.customXmlParts.getByNamespace(SIDECAR_NAMESPACE);
   parts.load("items");
   await context.sync();
   parts.items.forEach((p) => p.delete());
-  context.document.customXmlParts.add(sidecarToXml(sidecar));
+  context.document.customXmlParts.add(xml);
   await context.sync();
 }
 
@@ -108,7 +121,8 @@ export interface ReadResult {
 /** Read the current selection from Word as Obsidian-flavored markdown. */
 export async function readSelectionAsMarkdown(): Promise<ReadResult> {
   return Word.run(async (context) => {
-    const sidecar = await loadSidecar(context);
+    const loaded = await loadSidecar(context);
+    const sidecar = loaded.sidecar;
     const selection = context.document.getSelection();
     const html = selection.getHtml();
     selection.paragraphs.load("items/text,items/style");
@@ -136,7 +150,7 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     );
     // Keep only the objects referenced by the markdown just produced; older entries are stale.
     const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]);
-    await saveSidecar(context, pruneSidecar(sidecar, keep));
+    await saveSidecar(context, pruneSidecar(sidecar, keep), loaded);
     const notes: string[] = [];
     if (report.total) notes.push(`부동 개체 ${report.preserved}/${report.total}개 보존`);
     if (report.preserved < report.total)
@@ -167,7 +181,8 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 /** Replace the current selection in Word with the rendered markdown, restoring Word-only objects. */
 export async function replaceSelectionWithMarkdown(markdown: string): Promise<ApplyResult> {
   return Word.run(async (context) => {
-    const sidecar = await loadSidecar(context);
+    const loaded = await loadSidecar(context);
+    const sidecar = loaded.sidecar;
     // Original OOXML of the tables the markdown refers to (stored gz-compressed in the sidecar).
     const tableSources = new Map<string, { raw: string; rels?: string }>();
     for (const id of tableIds(markdown)) {
@@ -301,7 +316,11 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
     }
 
     // Drop sidecar entries for objects that are no longer referenced by the markdown being applied.
-    await saveSidecar(context, pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)])));
+    await saveSidecar(
+      context,
+      pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)])),
+      loaded,
+    );
     return { missing, notes: [...tableNotes, ...mathNotes] };
   });
 }
