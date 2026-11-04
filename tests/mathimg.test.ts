@@ -512,3 +512,18 @@ describe("load -> apply -> load is stable", () => {
     expect(mathImgIds(md).has(mathImgKey(BOXED, false))).toBe(true);
   });
 });
+
+describe("display pictures are centered through the marker paragraph", () => {
+  it("html of a display picture marker is align=center; inline ones and literal text are untouched", async () => {
+    const r = renderWithSidecar(`a $${BOXED}$ b\n\n$$\n${XRA}\n$$\n\n$$\n\\foobar\n$$`, new MemorySidecar());
+    const f = fake((l) => {
+      if (l.includes("foobar")) throw new RasterError("unsupported");
+      return ok();
+    });
+    const plan = await applyMathImages(r.html, r.equations, new MemorySidecar(), f.loader);
+    const [inline, disp] = r.equations;
+    expect(plan.html).toContain(`<p class="MsoNormal" align="center">${disp.marker}</p>`);
+    expect(plan.html).not.toContain(`align="center">${inline.marker}`);
+    expect(plan.html).not.toContain(`<p class="MsoNormal" align="center">$$`);
+  });
+});

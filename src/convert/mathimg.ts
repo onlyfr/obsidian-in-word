@@ -287,6 +287,8 @@ export function planMathImages(html: string, equations: MathResolved[], outcomes
     }
     if (o.kind === "image") {
       pictures.set(q.marker, mathImagePackageParts(o.id, o.entry, nextId++, q.display));
+      // insertOoxml(replace) keeps the formatting of the paragraph it replaces (measured in Word), so center that one.
+      if (q.display) html = html.replace(`<p class="MsoNormal">${q.marker}</p>`, () => `<p class="MsoNormal" align="center">${q.marker}</p>`);
       active.push(q);
       if (o.stored) stored++;
     } else {
