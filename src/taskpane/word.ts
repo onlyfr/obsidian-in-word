@@ -396,9 +396,9 @@ export async function replaceSelectionWithMarkdown(
       const found = checks.map((c) => ({ c, r: context.document.body.search(c.prefix, { matchCase: true }) }));
       found.forEach((f) => f.r.load("items"));
       await context.sync();
-      for (const { c, r } of found) if (r.items.length) throw new Error(`${c.label} ${r.items.length}개를 ${c.action} (Ctrl+Z로 되돌리세요)`);
+      for (const { c, r } of found) if (r.items.length) throw new Error(`${c.label} ${r.items.length}개를 ${c.action} (Ctrl+Z를 여러 번 눌러 되돌리세요)`);
       if (failedRequired.length)
-        throw new Error(`문서 개체 ${failedRequired.length}개를 삽입하지 못했습니다: ${failedRequired[0]} (Ctrl+Z로 되돌리세요)`);
+        throw new Error(`문서 개체 ${failedRequired.length}개를 삽입하지 못했습니다: ${failedRequired[0]} (Ctrl+Z를 여러 번 눌러 되돌리세요)`);
     }
 
     const after = context.document.getSelection();
