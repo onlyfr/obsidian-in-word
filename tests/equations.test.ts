@@ -84,7 +84,6 @@ describe("apply: lossless-first", () => {
 
   it("an untouched equation restores the original OMML byte-for-byte", () => {
     const res = renderWithSidecar(EXPECTED, sidecar);
-    expect(res.badMath).toEqual([]);
     expect(res.equations.map((e) => e.omml)).toEqual(originals);
     expect(res.equations.map((e) => e.display)).toEqual([false, false, true, true, false]);
     // markers sit in the HTML: inline ones inside the paragraph text, display ones alone in a paragraph
@@ -108,9 +107,11 @@ describe("apply: lossless-first", () => {
     expect(res.html).toContain(`>${res.equations[1].marker}</p>`);
   });
 
-  it("LaTeX that cannot be converted is reported (the apply refuses, no plain text written)", () => {
+  it("LaTeX without OMML is handed to the picture rung (no refusal, no plain text yet)", () => {
     const res = renderWithSidecar("bad $\\foo{x}$ here", new MemorySidecar());
-    expect(res.badMath).toEqual(["\\foo{x}"]);
+    expect(res.equations).toHaveLength(1);
+    expect(res.equations[0]).toMatchObject({ latex: "\\foo{x}", omml: "", img: true, display: false });
+    expect(res.html).toContain(res.equations[0].marker);
   });
 
   it("equation packages are insertable flat-OPC with the OMML verbatim", () => {

@@ -9,6 +9,17 @@ export interface SidecarEntry {
   omml?: string;
   /** kind "math": further OMML variants that read as the same LaTeX (consumed in order on apply). */
   alts?: string[];
+  /**
+   * kind "mathimg" (LaTeX Word cannot hold as an equation, shown as a picture): `latex` is the source, `png` the
+   * base64 PNG as inserted, `w`/`h` its size in CSS px (1/96 in), `baseline` the distance from the picture's top to the
+   * text baseline in px, `v` the render version.
+   */
+  display?: boolean;
+  png?: string;
+  w?: number;
+  h?: number;
+  baseline?: number;
+  v?: number;
   /** kind "equation": number of equations inside the opaque paragraph. */
   count?: number;
   /** kind "table": the markdown table (lines) as shown at load; ooxml holds the original table. */

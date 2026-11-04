@@ -21,14 +21,29 @@ export interface EqCapture {
 export interface PicCapture {
   kind: "pic";
 }
-export type ImgCapture = EqCapture | PicCapture;
+/** A picture carrying our `owb:math:<id>` alt marker: LaTeX rendered as an image (see mathimg.ts). */
+export interface MathImgCapture {
+  kind: "mathimg";
+  id: string;
+  display: boolean;
+  /** LaTeX read from the alt text (only when it was not truncated); used when the sidecar has no entry. */
+  latex?: string;
+}
+export type ImgCapture = EqCapture | PicCapture | MathImgCapture;
 
 export interface OoxmlScan {
   /** One entry per non-floating image-like object, in document order. */
   items: ImgCapture[];
   /** Number of equations (display or inline) in the selection, including ones that are not paired. */
   equations: number;
+  /** Number of pictures carrying our math alt marker (LaTeX rendered as an image). */
+  mathImages: number;
 }
+
+/** `descr="owb:math:<id>[:d][ latex…]"` of a picture's docPr (see mathImgAlt in mathimg.ts). */
+const MATHIMG_ALT_RE = /<wp:docPr\b[^>]*?\bdescr="owb:math:([0-9a-f]{8})(:d)?(?: ([^"]*))?"/;
+const unescapeXml = (v: string) =>
+  v.replace(/&(lt|gt|quot|amp);/g, (_m, e: string) => ({ lt: "<", gt: ">", quot: '"', amp: "&" })[e as "lt"]);
 
 const TAG_RE =
   /<m:oMathPara[\s>][\s\S]*?<\/m:oMathPara>|<m:oMath[\s>][\s\S]*?<\/m:oMath>|<wp:inline[\s>/]|<wp:anchor[\s>/]|<w:pict[\s>/]|<w:object[\s>/]/g;
@@ -36,6 +51,7 @@ const TAG_RE =
 export function scanOoxml(ooxml: string): OoxmlScan {
   const items: ImgCapture[] = [];
   let equations = 0;
+  let mathImages = 0;
   const bodyStart = ooxml.indexOf("<w:body");
   const body = bodyStart < 0 ? ooxml : ooxml.slice(bodyStart);
   for (const m of body.matchAll(TAG_RE)) {
@@ -46,7 +62,14 @@ export function scanOoxml(ooxml: string): OoxmlScan {
       const endTag = body.indexOf("</w:p>", m.index);
       const paraXml = start >= 0 && endTag >= 0 ? body.slice(start, endTag + 6) : "";
       items.push({ kind: "eq", omml: t, display: t.startsWith("<m:oMathPara"), paraXml });
-    } else if (t.startsWith("<wp:inline") || t.startsWith("<w:object")) items.push({ kind: "pic" });
+    } else if (t.startsWith("<wp:inline")) {
+      const end = body.indexOf("</wp:inline>", m.index);
+      const alt = MATHIMG_ALT_RE.exec(body.slice(m.index, end < 0 ? undefined : end));
+      if (alt) {
+        mathImages++;
+        items.push({ kind: "mathimg", id: alt[1], display: !!alt[2], latex: alt[3] === undefined || alt[3].endsWith("…") ? undefined : unescapeXml(alt[3]) });
+      } else items.push({ kind: "pic" });
+    } else if (t.startsWith("<w:object")) items.push({ kind: "pic" });
     else if (t.startsWith("<w:pict")) {
       // VML picture: floating when positioned absolutely.
       const end = body.indexOf("</w:pict>", m.index);
@@ -54,14 +77,14 @@ export function scanOoxml(ooxml: string): OoxmlScan {
     }
     // wp:anchor: floating, has no counterpart among the non-floating <img>s
   }
-  return { items, equations };
+  return { items, equations, mathImages };
 }
 
 /** Number of equations (display + inline) in an OOXML string. */
 export const countEquations = (ooxml: string) => scanOoxml(ooxml).equations;
 
 /** Flat-OPC package holding just `bodyXml`, accepted by `insertOoxml`. */
-export function wrapPackage(bodyXml: string, rels = ""): string {
+export function wrapPackage(bodyXml: string, rels = "", parts = ""): string {
   return (
     '<pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage">' +
     '<pkg:part pkg:name="/_rels/.rels" pkg:contentType="application/vnd.openxmlformats-package.relationships+xml">' +
@@ -74,6 +97,7 @@ export function wrapPackage(bodyXml: string, rels = ""): string {
       ? '<pkg:part pkg:name="/word/_rels/document.xml.rels" pkg:contentType="application/vnd.openxmlformats-package.relationships+xml">' +
         `<pkg:xmlData><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships></pkg:xmlData></pkg:part>`
       : "") +
+    parts +
     "</pkg:package>"
   );
 }
@@ -167,6 +191,13 @@ export function findMath(src: string): MathSpan[] {
   return out;
 }
 
+/** Id of a LaTeX-as-image pair (`kind=mathimg`); the render version is part of it, so a new renderer re-renders. */
+export const MATHIMG_VERSION = 1;
+export const mathImgKey = (latex: string, display: boolean) => hashId(`mathimg:v${MATHIMG_VERSION}:${display ? "D" : "I"}:${latex}`);
+
+/** Sidecar ids the image rung would use for the math spans of `markdown` (to keep them when pruning). */
+export const mathImgIds = (markdown: string): Set<string> => new Set(findMath(markdown).map((m) => mathImgKey(m.latex, m.display)));
+
 /** Sidecar ids of all math spans in `markdown` (to keep them when pruning). */
 export function mathIds(markdown: string): Set<string> {
   return new Set(findMath(markdown).map((m) => mathKey(m.latex, m.display)));
@@ -180,6 +211,8 @@ export interface MathResolved {
   omml: string;
   display: boolean;
   latex: string;
+  /** No OMML (`omml` is empty): the caller makes a picture of it, or literal text when that fails (see mathimg.ts). */
+  img?: boolean;
 }
 
 /**
@@ -192,7 +225,6 @@ export function tokenizeMath(
   used: Map<string, number>,
   offset: number,
   resolved: MathResolved[],
-  bad: string[],
 ): string {
   const spans = findMath(src);
   let out = "";
@@ -210,13 +242,8 @@ export function tokenizeMath(
       omml = n < variants.length ? variants[n] : null;
     }
     omml ??= latexToOmml(s.latex, s.display);
-    if (omml === null) {
-      bad.push(s.latex);
-      out += src.slice(s.start, s.end);
-      continue;
-    }
     const marker = `${TOKEN_PREFIX}${offset + resolved.length}END`;
-    resolved.push({ marker, omml, display: s.display, latex: s.latex });
+    resolved.push({ marker, omml: omml ?? "", display: s.display, latex: s.latex, img: omml === null || undefined });
     out += s.display ? `\n\n${marker}\n\n` : marker;
   }
   return out + src.slice(pos);

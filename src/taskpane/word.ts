@@ -7,7 +7,7 @@ import {
   type MathReport,
   type TableReport,
 } from "../convert/obsidian";
-import { countEquations, equationPackage, mathIds, scanOoxml, wrapPackage } from "../convert/equations";
+import { equationPackage, mathIds, mathImgIds, scanOoxml, wrapPackage } from "../convert/equations";
 import { TABLE_MARKER_RE, countTables, scanTables, tableRels } from "../convert/tables";
 
 /** Sidecar ids of the markdown tables (`<!-- word:table id=... -->`). */
@@ -135,7 +135,7 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
       html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport,
     );
     // Keep only the objects referenced by the markdown just produced; older entries are stale.
-    const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown), ...tableIds(markdown)]);
+    const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]);
     await saveSidecar(context, pruneSidecar(sidecar, keep));
     const notes: string[] = [];
     if (report.total) notes.push(`부동 개체 ${report.preserved}/${report.total}개 보존`);
@@ -143,6 +143,7 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
       notes.push(`경고: 부동 개체 ${report.total - report.preserved}개는 보존할 수 없어 적용 시 중단됩니다`);
     if (mathReport.total)
       notes.push(`수식 ${mathReport.latex}/${mathReport.total}개 LaTeX로 표시` + (mathReport.opaque ? `, ${mathReport.opaque}개는 원본 보존` : ""));
+    if (mathReport.images) notes.push(`수식 그림 ${mathReport.images}개를 LaTeX로 표시`);
     if (tableReport.total)
       notes.push(
         `표 ${tableReport.simple}/${tableReport.total}개 마크다운 표로 표시` +
@@ -173,13 +174,10 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       const e = sidecar.get(id);
       if (e?.kind === "table" && e.ooxml) tableSources.set(id, { raw: await ungz(e.ooxml), rels: e.rels });
     }
-    const { html, missing, styled, floats, lost, equations, badMath, opaqueEquations, tables, badTables, tableNotes, opaqueTables } =
+    const { html: html0, missing, styled, floats, lost, equations, opaqueEquations, tables, badTables, tableNotes, opaqueTables } =
       renderWithSidecar(markdown, sidecar, tableSources);
 
     if (badTables.length) throw new Error(`표를 적용할 수 없어 중단했습니다: ${badTables[0]}`);
-
-    if (badMath.length)
-      throw new Error(`LaTeX를 수식으로 변환할 수 없어 적용을 중단했습니다: ${badMath[0].slice(0, 60)}`);
 
     // Safety net: never silently destroy a floating object.
     if (lost.length)
@@ -195,7 +193,9 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
         `선택 영역에 표 ${tablesPresent}개가 있지만 마크다운에는 ${tables.length + opaqueTables}개만 있습니다. ` +
           `적용하면 표가 사라지므로 중단했습니다 (표 줄이나 <!-- word:obj … kind=table --> 줄을 지우지 마세요)`,
       );
-    const eqPresent = countEquations(currentOoxml.value);
+    // Word equations and pictures of LaTeX (`owb:math:` alt marker) all have to be among the markdown's math spans.
+    const scanNow = scanOoxml(currentOoxml.value);
+    const eqPresent = scanNow.equations + scanNow.mathImages;
     if (eqPresent > equations.length + opaqueEquations)
       throw new Error(
         `선택 영역에 수식 ${eqPresent}개가 있지만 마크다운에는 ${equations.length + opaqueEquations}개만 있습니다. ` +
@@ -209,10 +209,22 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       );
     const ooxml = await Promise.all(floats.map((f) => ungz(f.ooxml)));
 
+    // Math without OMML: a picture of the LaTeX (stored one if unchanged), else the literal source with a warning.
+    // Rendering is async, so it all happens before the document is touched.
+    let html = html0;
+    let active = equations;
+    let pictures = new Map<string, { body: string; rels: string; parts: string }>();
+    const mathNotes: string[] = [];
+    if (equations.some((q) => q.img)) {
+      const plan = await (await import("../convert/mathimg")).applyMathImages(html0, equations, sidecar);
+      ({ html, active, pictures } = plan);
+      mathNotes.push(...plan.notes);
+    }
+
     const inserted = context.document.getSelection().insertHtml(html, Word.InsertLocation.replace);
     inserted.paragraphs.load("items/text");
     // Inline equations are marker words inside a paragraph: locate them (display ones are whole marker paragraphs).
-    const found = equations.map((q) => (q.display ? undefined : inserted.search(q.marker, { matchCase: true })));
+    const found = active.map((q) => (q.display ? undefined : inserted.search(q.marker, { matchCase: true })));
     found.forEach((f) => f?.load("items"));
     await context.sync();
 
@@ -245,8 +257,9 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       if (next && !/^OWB(?:TBL|EQ|FLOAT)\d/.test(next.text.trim())) ops.push(() => next.getPrevious().delete());
     });
     // Equations: display ones replace their marker paragraph, inline ones replace the marker word.
-    equations.forEach((q, n) => {
-      const pkg = equationPackage(q.omml);
+    active.forEach((q, n) => {
+      const pic = pictures.get(q.marker);
+      const pkg = pic ? wrapPackage(pic.body, pic.rels, pic.parts) : equationPackage(q.omml);
       if (q.display) {
         const idx = paras.findIndex((p) => p.text.trim() === q.marker);
         if (idx < 0) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
@@ -274,7 +287,7 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       }
     }
 
-    if (equations.length || tables.length) {
+    if (active.length || tables.length) {
       // The fallback above swallows per-operation failures: make sure no marker was left behind as text.
       const left = context.document.body.search("OWBEQ", { matchCase: true });
       const leftT = context.document.body.search("OWBTBL", { matchCase: true });
@@ -288,7 +301,7 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
     }
 
     // Drop sidecar entries for objects that are no longer referenced by the markdown being applied.
-    await saveSidecar(context, pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown), ...tableIds(markdown)])));
-    return { missing, notes: tableNotes };
+    await saveSidecar(context, pruneSidecar(sidecar, new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)])));
+    return { missing, notes: [...tableNotes, ...mathNotes] };
   });
 }

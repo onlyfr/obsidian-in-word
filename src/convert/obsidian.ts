@@ -156,15 +156,27 @@ export function htmlToMarkdown(
   const tokens: MathToken[] = [];
   const eqPackages: { pkg: string; count: number }[] = [];
   const tableBlocks: string[] = [];
+  const pics = { total: 0, math: new Set<number>() };
   const cleaned = convertSimpleTables(
-    replaceEquationImages(cleanWordHtml(html), imgCaptures, sidecar, tokens, eqPackages, mathReport),
+    replaceEquationImages(cleanWordHtml(html), imgCaptures, sidecar, tokens, eqPackages, mathReport, pics),
     tableCaps,
     sidecar,
     tableBlocks,
     tableReport,
   );
   const raw0 = tokensToPlaceholders(
-    td.turndown(protectOpaque(cleaned, sidecar, styleNames, images, floatOoxml, report, eqPackages)),
+    td.turndown(
+      protectOpaque(
+        cleaned,
+        sidecar,
+        styleNames,
+        // Office.js lists our math pictures among the inline pictures; they became $latex$ above, so drop their bytes.
+        images && pics.math.size && images.length === pics.total ? images.filter((_, k) => !pics.math.has(k)) : images,
+        floatOoxml,
+        report,
+        eqPackages,
+      ),
+    ),
   );
   // Literal dollar signs must not read as math; then put the equations in as $latex$ / $$ blocks.
   const raw = raw0;
@@ -282,6 +294,8 @@ export interface MathReport {
   opaque: number;
   /** Equations that could not be paired with an HTML image (counts did not match); apply will refuse. */
   unpaired: number;
+  /** LaTeX-as-picture pairs (`owb:math:` alt marker) shown as LaTeX again; not part of `total`. */
+  images?: number;
 }
 
 interface MathToken {
@@ -300,22 +314,28 @@ function replaceEquationImages(
   tokens: MathToken[],
   eqPackages: { pkg: string; count: number }[],
   report?: MathReport,
+  /** Out: number of non-equation pictures in the OOXML, and the (ordinal) positions of those that became math. */
+  pics?: { total: number; math: Set<number> },
 ): string {
+  if (pics && caps) pics.total = caps.filter((c) => c.kind !== "eq").length;
   const eqCount = caps?.filter((c) => c.kind === "eq").length ?? 0;
+  const miCount = caps?.filter((c) => c.kind === "mathimg").length ?? 0;
   if (report) report.total += eqCount;
-  if (!caps || !eqCount) return html;
+  if (!caps || !(eqCount + miCount)) return html;
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
   const imgs = Array.from(doc.body.querySelectorAll("img")).filter((i) => !isFloatingImg(i));
   if (imgs.length !== caps.length) {
-    if (report) report.unpaired += eqCount;
+    if (report) report.unpaired += eqCount + miCount;
     return html;
   }
   const perPara = new Map<string, number>();
   for (const c of caps) if (c.kind === "eq") perPara.set(c.paraXml, (perPara.get(c.paraXml) ?? 0) + 1);
   const pkgIndex = new Map<string, number>();
+  let ord = -1;
   imgs.forEach((img, i) => {
     const cap = caps[i];
-    if (cap.kind !== "eq") return;
+    if (cap.kind !== "eq") ord++;
+    if (cap.kind === "pic") return;
     if (img.closest("table")) {
       // Equations inside tables cannot be restored separately from the (opaque) table: leave them, apply will refuse.
       if (report) report.unpaired++;
@@ -323,6 +343,21 @@ function replaceEquationImages(
     }
     const span = img.parentElement;
     const target = span && span.tagName === "SPAN" && span.children.length === 1 && !(span.textContent ?? "").trim() ? span : img;
+    if (cap.kind === "mathimg") {
+      // LaTeX shown as a picture: the source comes from the sidecar pair (or, failing that, an untruncated alt text).
+      const e = sidecar.get(cap.id);
+      const latex = e?.kind === "mathimg" && e.latex ? e.latex : cap.latex;
+      const display = e?.kind === "mathimg" ? !!e.display : cap.display;
+      if (!latex || /(?<!\\)\$/.test(latex) || (!display && latex.includes("\n"))) {
+        if (report) report.unpaired++; // no usable source: stays a plain picture, apply refuses rather than lose it
+        return;
+      }
+      tokens.push({ latex, display });
+      target.replaceWith(doc.createTextNode(`OWBEQ${tokens.length - 1}END`));
+      pics?.math.add(ord);
+      if (report) report.images = (report.images ?? 0) + 1;
+      return;
+    }
     const res = captureMath(cap, sidecar);
     if (res) {
       tokens.push({ latex: res.latex, display: cap.display });
@@ -380,11 +415,10 @@ export interface RenderResult {
   lost: string[];
   /**
    * Equations written as `$...$` / `$$...$$`. `html` contains each `marker` as plain text (display ones alone in their
-   * paragraph); the caller replaces it with `insertOoxml(equationPackage(omml))`.
+   * paragraph); the caller replaces it with `insertOoxml(equationPackage(omml))`. Entries with `img` have no OMML: the
+   * caller makes a picture of the LaTeX (mathimg.ts) or, when that fails, writes the `$...$` source instead.
    */
   equations: MathResolved[];
-  /** LaTeX that could not be converted to an equation: applying would write it as plain text, so the caller refuses. */
-  badMath: string[];
   /** Equations inside opaque `kind=equation` paragraphs that are restored from the sidecar. */
   opaqueEquations: number;
   /**
@@ -468,7 +502,6 @@ export function renderWithSidecar(
   const floats: RenderResult["floats"] = [];
   const lost: string[] = [];
   const equations: MathResolved[] = [];
-  const badMath: string[] = [];
   const usedMath = new Map<string, number>();
   let opaqueEquations = 0;
   let opaqueTables = 0;
@@ -478,7 +511,7 @@ export function renderWithSidecar(
   let html = "";
   for (let i = 0; i < parts.length; i += 3) {
     const noTables = extractTables(parts[i], sidecar, tableSources, tables, badTables, tableNotes);
-    const chunk = markdownToHtml(tokenizeMath(noTables, sidecar, usedMath, equations.length, equations, badMath));
+    const chunk = markdownToHtml(tokenizeMath(noTables, sidecar, usedMath, equations.length, equations));
     html += chunk;
     collectStyled(chunk, styled);
     const id = parts[i + 1];
@@ -498,5 +531,5 @@ export function renderWithSidecar(
       html += `<p>[missing Word object ${id}]</p>`;
     }
   }
-  return { html, missing, styled, floats, lost, equations, badMath, opaqueEquations, tables, badTables, tableNotes, opaqueTables };
+  return { html, missing, styled, floats, lost, equations, opaqueEquations, tables, badTables, tableNotes, opaqueTables };
 }
