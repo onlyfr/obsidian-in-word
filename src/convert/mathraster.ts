@@ -27,8 +27,9 @@ function mathElement(html: string, display: boolean): Element {
   // Natural width (no `width:100%` block), but display-style sizing for display math.
   math.removeAttribute("display");
   math.classList.remove("tml-display");
-  const style = (math.getAttribute("style") ?? "").replace(/;?\s*$/, ";");
-  math.setAttribute("style", `${style}math-style:${display ? "normal" : "compact"};`);
+  // Temml puts `display:block math` into the style of display math: lay it out inline instead.
+  const style = (math.getAttribute("style") ?? "").replace(/(^|;)\s*display\s*:[^;]*/gi, "$1");
+  math.setAttribute("style", `${style};display:inline math;math-style:${display ? "normal" : "compact"};`);
   return math;
 }
 
