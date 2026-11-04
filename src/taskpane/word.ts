@@ -1,5 +1,6 @@
-import { normText, placeholderIds, type FloatBlock, type FloatReport } from "../convert/blocks";
+import { hashId, normText, placeholderIds, type FloatBlock, type FloatReport } from "../convert/blocks";
 import {
+  BLANK_TOKEN,
   findFloatingBlocks,
   htmlToMarkdown,
   renderWithSidecar,
@@ -130,7 +131,7 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     const sidecar = loaded.sidecar;
     const selection = context.document.getSelection();
     const html = selection.getHtml();
-    selection.paragraphs.load("items/text,items/style");
+    selection.paragraphs.load("items/text,items/style,items/tableNestingLevel");
     selection.inlinePictures.load("items");
     const selOoxml = selection.getOoxml();
     await context.sync();
@@ -151,8 +152,9 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     const tableReport: TableReport = { total: 0, simple: 0, opaque: 0, unpaired: 0, reasons: {} };
     const tableCaps = await Promise.all(scanTables(selOoxml.value).map(async (raw) => ({ raw, gz: await gz(raw), rels: tableRels(raw, selOoxml.value) })));
     const markdown = htmlToMarkdown(
-      html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport,
+      html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport, trailingBlanks(selection.paragraphs.items),
     );
+    lastRegion = regionSignature(selection.paragraphs.items.map((p) => p.text));
     // Keep only the objects referenced by the markdown just produced; older entries are stale.
     const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]);
     await saveSidecar(context, pruneSidecar(sidecar, keep), loaded);
@@ -183,9 +185,43 @@ export interface ApplyResult {
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
+/**
+ * Fingerprint of a region's text (paragraph by paragraph). Remembered after every load and apply: the next apply asks
+ * before it replaces a selection that is not the region the editor's markdown came from.
+ */
+export const regionSignature = (paragraphs: string[]) => `${paragraphs.length}:${hashId(paragraphs.map(norm).join("\n"))}`;
+let lastRegion: string | null = null;
+/** Empty top-level paragraphs at the end of the selection (those in tables do not count). */
+const trailingBlanks = (ps: { text: string; tableNestingLevel: number }[]) => {
+  let n = 0;
+  for (let i = ps.length - 1; i >= 0 && ps[i].tableNestingLevel === 0 && !ps[i].text.trim(); i--) n++;
+  return n;
+};
+export const forgetRegion = () => (lastRegion = null);
+
 /** Replace the current selection in Word with the rendered markdown, restoring Word-only objects. */
-export async function replaceSelectionWithMarkdown(markdown: string): Promise<ApplyResult> {
+export async function replaceSelectionWithMarkdown(
+  markdown: string,
+  /** Asks the user (true = go on) when the selection is not the region that was last loaded/applied. */
+  confirm?: (message: string) => Promise<boolean>,
+): Promise<ApplyResult> {
   return Word.run(async (context) => {
+    // A collapsed selection (just a cursor) cannot be read (getHtml throws GeneralException), and replacing it would
+    // insert the markdown next to the old content instead of replacing it.
+    const sel0 = context.document.getSelection();
+    sel0.load("isEmpty");
+    sel0.paragraphs.load("items/text");
+    await context.sync();
+    if (sel0.isEmpty)
+      throw new Error(
+        "선택 영역이 비어 있습니다 (커서만 있음). 바꿀 영역을 선택한 뒤 다시 누르세요 (방금 적용한 영역을 다시 선택하거나 '선택 영역 → 마크다운'으로 다시 불러오세요)",
+      );
+    if (lastRegion !== null && regionSignature(sel0.paragraphs.items.map((p) => p.text)) !== lastRegion) {
+      const ok = confirm
+        ? await confirm("지금 선택한 영역이 마지막으로 불러오거나 적용한 영역과 다릅니다. 에디터의 마크다운으로 이 영역을 바꿀까요?")
+        : false;
+      if (!ok) throw new Error("적용을 취소했습니다: 선택 영역이 마지막으로 불러오거나 적용한 영역과 다릅니다 ('선택 영역 → 마크다운'으로 다시 불러오세요)");
+    }
     const loaded = await loadSidecar(context);
     const sidecar = loaded.sidecar;
     // Original OOXML of the tables the markdown refers to (stored gz-compressed in the sidecar).
@@ -241,7 +277,22 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       mathNotes.push(...plan.notes);
     }
 
-    const inserted = context.document.getSelection().insertHtml(html, Word.InsertLocation.replace);
+    const selection = context.document.getSelection();
+    // The paragraphs just outside the selection are not touched by the replacement: they delimit the region again
+    // afterwards (the range insertHtml returns shrinks when its first/last paragraph is replaced by an object).
+    const first = selection.paragraphs.getFirst();
+    const last = selection.paragraphs.getLast();
+    const prev = first.getPreviousOrNullObject();
+    const next = last.getNextOrNullObject();
+    prev.load("isNullObject");
+    next.load("isNullObject");
+    const startCmp = selection.getRange("Start").compareLocationWith(first.getRange("Start"));
+    const endCmp = selection.getRange("End").compareLocationWith(last.getRange("End"));
+    context.trackedObjects.add(prev);
+    context.trackedObjects.add(next);
+    await context.sync();
+    const wholeParagraphs = startCmp.value === "Equal" && endCmp.value === "Equal";
+    const inserted = selection.insertHtml(html, Word.InsertLocation.replace);
     inserted.paragraphs.load("items/text");
     // Inline equations are marker words inside a paragraph: locate them (display ones are whole marker paragraphs).
     const found = active.map((q) => (q.display ? undefined : inserted.search(q.marker, { matchCase: true })));
@@ -290,6 +341,15 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
         ops.push(() => r.insertOoxml(pkg, Word.InsertLocation.replace));
       }
     });
+    // Empty paragraphs (`<!-- word:blank -->` markers): the marker paragraphs become empty again.
+    for (const p of paras) if (p.text.trim() === BLANK_TOKEN) ops.push(() => p.clear());
+    // Leave the whole inserted region selected, so that applying again replaces the same region.
+    ops.push(() => {
+      if (!wholeParagraphs) return inserted.select(); // the selection began/ended inside a paragraph
+      const from = prev.isNullObject ? context.document.body.getRange("Start") : prev.getRange("After");
+      const to = next.isNullObject ? context.document.body.paragraphs.getLast().getRange("Whole") : next.getRange("Start");
+      from.expandTo(to).select();
+    });
     if (ops.length) {
       try {
         ops.forEach((op) => op());
@@ -307,18 +367,29 @@ export async function replaceSelectionWithMarkdown(markdown: string): Promise<Ap
       }
     }
 
-    if (active.length || tables.length) {
+    if (active.length || tables.length || paras.some((p) => p.text.trim() === BLANK_TOKEN)) {
       // The fallback above swallows per-operation failures: make sure no marker was left behind as text.
       const left = context.document.body.search("OWBEQ", { matchCase: true });
       const leftT = context.document.body.search("OWBTBL", { matchCase: true });
+      const leftB = context.document.body.search(BLANK_TOKEN, { matchCase: true });
       left.load("items");
       leftT.load("items");
+      leftB.load("items");
       await context.sync();
       if (left.items.length)
         throw new Error(`수식 ${left.items.length}개를 삽입하지 못했습니다 (Ctrl+Z로 되돌리세요)`);
       if (leftT.items.length)
         throw new Error(`표 ${leftT.items.length}개를 삽입하지 못했습니다 (Ctrl+Z로 되돌리세요)`);
+      if (leftB.items.length)
+        throw new Error(`빈 문단 ${leftB.items.length}개를 만들지 못했습니다 (Ctrl+Z로 되돌리세요)`);
     }
+
+    const after = context.document.getSelection();
+    after.paragraphs.load("items/text");
+    await context.sync();
+    prev.untrack();
+    next.untrack();
+    lastRegion = regionSignature(after.paragraphs.items.map((p) => p.text));
 
     // Drop sidecar entries for objects that are no longer referenced by the markdown being applied.
     await saveSidecar(
