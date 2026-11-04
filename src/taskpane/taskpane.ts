@@ -69,7 +69,10 @@ Office.onReady((info) => {
   document.getElementById("apply")!.onclick = () =>
     run("적용", async () => {
       const { replaceSelectionWithMarkdown } = await loadWord();
-      const { missing, notes } = await replaceSelectionWithMarkdown(view.state.doc.toString());
+      const { askConfirm } = await import("./confirm");
+      const { missing, notes } = await replaceSelectionWithMarkdown(view.state.doc.toString(), (msg) =>
+        askConfirm(document.body, msg, "바꾸기", "취소"),
+      );
       if (missing.length) throw new Error(`복원할 수 없는 Word 객체: ${missing.join(", ")}`);
       return [...new Set(notes)];
     });

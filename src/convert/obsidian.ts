@@ -151,18 +151,23 @@ export function htmlToMarkdown(
   tableCaps?: TableCapture[],
   /** Out: table statistics. */
   tableReport?: TableReport,
+  /** Number of empty top-level paragraphs at the end of the selection according to Office.js (see markBlankParagraphs). */
+  officeTrailingBlanks?: number,
 ): string {
   const styleNames = new Map([...parseStyleNames(html), ...styleNameHints]);
   const tokens: MathToken[] = [];
   const eqPackages: { pkg: string; count: number }[] = [];
   const tableBlocks: string[] = [];
   const pics = { total: 0, math: new Set<number>() };
-  const cleaned = convertSimpleTables(
-    replaceEquationImages(cleanWordHtml(html), imgCaptures, sidecar, tokens, eqPackages, mathReport, pics),
-    tableCaps,
-    sidecar,
-    tableBlocks,
-    tableReport,
+  const cleaned = markBlankParagraphs(
+    convertSimpleTables(
+      replaceEquationImages(cleanWordHtml(html), imgCaptures, sidecar, tokens, eqPackages, mathReport, pics),
+      tableCaps,
+      sidecar,
+      tableBlocks,
+      tableReport,
+    ),
+    officeTrailingBlanks,
   );
   const raw0 = tokensToPlaceholders(
     td.turndown(
@@ -192,6 +197,8 @@ export function htmlToMarkdown(
     });
   return out
     .replace(/^OWBTBL(\d+)END[ 	]*$/gm, (_m, n: string) => tableBlocks[Number(n)])
+    // runs of empty paragraphs become one marker line (see markBlankParagraphs)
+    .replace(BLANK_RUN_RE, (m) => blankMarker(m.split(BLANK_TOKEN).length - 1))
     .replace(/^(\s*)-   /gm, "$1- ") // turndown pads list items to 4 columns
     .replace(/^(\s*)(\d+\.) {2,}/gm, "$1$2 ")
     .replace(/\\\[\\\[(.+?)\\\]\\\]/g, "[[$1]]") // turndown escapes the brackets of plain-text [[wikilinks]]
@@ -200,6 +207,57 @@ export function htmlToMarkdown(
       `> [!${type}]${title ? " " + title : ""}\n`,
     )
     .trimEnd();
+}
+
+/**
+ * Empty paragraphs (spacing) have no markdown form of their own: a blank line is only a separator. They are written as
+ * `<!-- word:blank -->` lines (a run of n as `<!-- word:blank n=3 -->`) and become empty paragraphs again on apply.
+ */
+export const BLANK_TOKEN = "OWBBLANKEND";
+export const BLANK_MARKER_RE = /^<!-- word:blank(?: n=(\d+))? -->[ \t]*$/gm;
+const BLANK_RUN_RE = new RegExp(`^${BLANK_TOKEN}(?:\\n+${BLANK_TOKEN})*[ \\t]*$`, "gm");
+/** Longest run of empty paragraphs one marker can stand for. */
+export const MAX_BLANK_RUN = 50;
+export const blankMarker = (n: number) => (n === 1 ? "<!-- word:blank -->" : `<!-- word:blank n=${n} -->`);
+
+/** Top-level plain paragraphs with no content at all (getHtml: `<p class=MsoNormal><span>&nbsp;</span></p>`) -> token. */
+function markBlankParagraphs(html: string, officeTrailingBlanks?: number): string {
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  let found = false;
+  const walk = (parent: Element): void => {
+    for (const el of Array.from(parent.children)) {
+      if (el.tagName === "DIV" && /^WordSection/i.test(el.className)) {
+        walk(el);
+        continue;
+      }
+      if (el.tagName !== "P" || !/^(?:MsoNormal)?$/.test(el.className.trim())) continue;
+      if (el.querySelector(":not(span)")) continue; // pictures, line breaks, links, bookmarks ...: not just spacing
+      if ((el.textContent ?? "").replace(/[\s ]/g, "") !== "") continue;
+      const p = doc.createElement("p");
+      p.textContent = BLANK_TOKEN;
+      el.replaceWith(p);
+      found = true;
+    }
+  };
+  walk(doc.body);
+  if (found && officeTrailingBlanks !== undefined) {
+    // When the selection includes its last paragraph mark, getHtml appends one empty paragraph that does not exist
+    // (measured in Word: 3 empty paragraphs at the end of a document come out as 4). Office.js knows the real number.
+    let last: Element = doc.body;
+    while (last.lastElementChild?.tagName === "DIV" && /^WordSection/i.test(last.lastElementChild.className)) last = last.lastElementChild;
+    let run = 0;
+    for (let e = last.lastElementChild; e && e.tagName === "P" && e.textContent === BLANK_TOKEN; e = e.previousElementSibling) run++;
+    if (run === officeTrailingBlanks + 1) last.lastElementChild!.remove();
+  }
+  return found ? doc.body.innerHTML : html;
+}
+
+/** Markdown `<!-- word:blank n=3 -->` lines -> that many token paragraphs (the caller clears them after insertHtml). */
+export function expandBlankMarkers(src: string): string {
+  return src.replace(BLANK_MARKER_RE, (_m, n?: string) => {
+    const k = Math.min(Math.max(Number(n ?? 1) || 1, 1), MAX_BLANK_RUN);
+    return `\n\n${Array(k).fill(BLANK_TOKEN).join("\n\n")}\n\n`;
+  });
 }
 
 export interface TableCapture {
@@ -510,7 +568,7 @@ export function renderWithSidecar(
   const tableNotes: string[] = [];
   let html = "";
   for (let i = 0; i < parts.length; i += 3) {
-    const noTables = extractTables(parts[i], sidecar, tableSources, tables, badTables, tableNotes);
+    const noTables = extractTables(expandBlankMarkers(parts[i]), sidecar, tableSources, tables, badTables, tableNotes);
     const chunk = markdownToHtml(tokenizeMath(noTables, sidecar, usedMath, equations.length, equations));
     html += chunk;
     collectStyled(chunk, styled);

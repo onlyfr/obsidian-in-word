@@ -54,7 +54,8 @@ describe("load: equations become LaTeX", () => {
     const rep = report();
     const sidecar = new MemorySidecar();
     const md = htmlToMarkdown(html, sidecar, new Map(), undefined, undefined, undefined, scanOoxml(body).items, rep);
-    expect(md).toBe(EXPECTED);
+    // the captured selection ends with an (empty) last paragraph: it is kept as a blank-paragraph marker
+    expect(md).toBe(`${EXPECTED}\n\n<!-- word:blank -->`);
     expect(rep).toEqual({ total: 5, latex: 5, opaque: 0, unpaired: 0 });
     // the OMML/LaTeX pairs are stored in the sidecar
     const kinds = [...sidecar.entries()].map(([, e]) => e.kind);
