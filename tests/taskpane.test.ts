@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {readFileSync} from "node:fs";
+const markup=new DOMParser().parseFromString(readFileSync('src/taskpane/index.html','utf8'),'text/html').body.innerHTML;
 
 /** The task pane's start-up: lazy chunks are started after the first paint; Office.onReady may fire before or after. */
 describe("task pane start-up status", () => {
@@ -7,8 +9,7 @@ describe("task pane start-up status", () => {
   beforeEach(() => {
     vi.resetModules();
     localStorage.clear();
-    document.body.innerHTML =
-      '<button id="load"></button><button id="apply"></button><select id="math-output"><option value="hybrid">hybrid</option><option value="images">images</option></select><div id="editor"></div><p id="status"></p>';
+    document.body.innerHTML = markup;
     ready = null;
     (globalThis as any).Office = { HostType: { Word: "Word" }, onReady: (cb: typeof ready) => (ready = cb) };
     vi.doMock("../src/taskpane/word", () => ({}));
@@ -65,9 +66,37 @@ describe("task pane start-up status", () => {
     expect(apply).toHaveBeenCalledTimes(1);
     expect(apply.mock.calls[0][2]).toEqual({mathOutput:'images'});
     expect(button.disabled).toBe(true);expect(select.disabled).toBe(true);
+    expect((document.getElementById('editor-wrap') as HTMLInputElement).disabled).toBe(true);
     button.click();(document.getElementById('load') as HTMLButtonElement).click();
     expect(read).not.toHaveBeenCalled();expect(apply).toHaveBeenCalledTimes(1);
     finish();await settle();expect(button.disabled).toBe(false);expect(select.disabled).toBe(false);
+    expect((document.getElementById('editor-wrap') as HTMLInputElement).disabled).toBe(false);
     select.value='hybrid';select.dispatchEvent(new Event('change'));expect(localStorage.getItem('oiw:math-output')).toBe('hybrid');
+  });
+  it('applies and saves editor appearance without replacing the document',async()=>{
+    vi.doMock('../src/taskpane/word',()=>({readSelectionAsMarkdown:async()=>({markdown:'saved **text**',notes:[]})}));
+    await import('../src/taskpane/taskpane');await settle();ready!({host:'Word'});
+    (document.getElementById('load') as HTMLButtonElement).click();await settle();
+    const content=document.querySelector('.cm-content') as HTMLElement;
+    const numbers=document.getElementById('editor-line-numbers') as HTMLInputElement;
+    numbers.checked=false;numbers.dispatchEvent(new Event('change'));
+    const wrap=document.getElementById('editor-wrap') as HTMLInputElement;
+    wrap.checked=false;wrap.dispatchEvent(new Event('change'));
+    const size=document.getElementById('editor-font-size') as HTMLSelectElement;
+    size.value='18';size.dispatchEvent(new Event('change'));
+    expect(document.querySelector('.cm-lineNumbers')).toBeNull();
+    expect(document.querySelector('.cm-lineWrapping')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('oiw:editor-options')!)).toEqual({lineNumbers:false,wrap:false,fontSize:18});
+    // Options reconfigure the same editor instead of creating a new view.
+    expect(document.querySelector('.cm-content')).toBe(content);
+    expect(content.textContent).toBe('saved **text**');
+  });
+  it('restores saved editor appearance on startup',async()=>{
+    localStorage.setItem('oiw:editor-options',JSON.stringify({lineNumbers:false,wrap:false,fontSize:20}));
+    await import('../src/taskpane/taskpane');await settle();
+    expect((document.getElementById('editor-line-numbers') as HTMLInputElement).checked).toBe(false);
+    expect((document.getElementById('editor-wrap') as HTMLInputElement).checked).toBe(false);
+    expect((document.getElementById('editor-font-size') as HTMLSelectElement).value).toBe('20');
+    expect(document.querySelector('.cm-lineNumbers')).toBeNull();expect(document.querySelector('.cm-lineWrapping')).toBeNull();
   });
 });

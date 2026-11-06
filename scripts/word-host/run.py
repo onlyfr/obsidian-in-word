@@ -115,6 +115,7 @@ def main():
     parser.add_argument('--dev-settings-dir', type=Path, help='Path to installed office-addin-dev-settings package')
     parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
+    parser.add_argument('--settings-ui-only', action='store_true', help='Run actual task-pane settings tabs/editor/plugin UI checks without keyboard input')
     parser.add_argument('--format-only', action='store_true', help='Run only Markdown formatting round-trip regression cases')
     parser.add_argument('--native-guard-only', action='store_true', help='Build and test the native source-write boundary without keyboard injection')
     parser.add_argument('--native-flow-only', action='store_true', help='Run integrated native body transitions, selection and recovery (no keyboard injection)')
@@ -202,6 +203,12 @@ def main():
                 case('js','session-undo-recover','session-undo-recover.js')
                 case('com','session-delete','session-delete.ps1')
                 case('js','session-delete-check','session-delete-check.js')
+            if args.settings_ui_only:
+                case('js','setup','setup.js')
+                case('js','settings-ui','settings-ui.js')
+                (run/'settings-ui-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Task-pane settings UI passed. Evidence: {run}',flush=True)
+                return
             if args.native_format_only:
                 case('js','setup','setup.js')
                 case('js','native-format-start','native-format-start.js')
