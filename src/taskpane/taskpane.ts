@@ -1,7 +1,8 @@
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { loadMathOutput, saveMathOutput } from "./preferences";
+import { loadMathOutput, saveMathOutput,loadEditorPreferences,saveEditorPreferences,type EditorPreferences } from "./preferences";
+import {initSettingsDialog} from "./settings-dialog";
 import type { MathOutputMode } from "../convert/mathimg";
 
 // Heavy parts are separate chunks loaded after the first paint: the markdown language support (pulls in the
@@ -10,6 +11,7 @@ const loadWord = () => import("./word");
 
 const status = document.getElementById("status")!;
 const setStatus = (msg: string) => (status.textContent = msg);
+const settings=initSettingsDialog();
 const mathOutput = document.getElementById("math-output") as HTMLSelectElement;
 mathOutput.value = loadMathOutput();
 mathOutput.onchange = () => saveMathOutput(mathOutput.value === "images" ? "images" : "hybrid");
@@ -17,12 +19,18 @@ mathOutput.onchange = () => saveMathOutput(mathOutput.value === "images" ? "imag
 // Extensions registered by loaded Obsidian community plugins are swapped into this compartment.
 const pluginExtensions = new Compartment();
 const markdownLanguage = new Compartment();
+const editorOptions=new Compartment();
+let preferences=loadEditorPreferences();
+const appearance=(options:EditorPreferences)=>[
+  ...(options.lineNumbers?[lineNumbers()]:[]),
+  ...(options.wrap?[EditorView.lineWrapping]:[]),
+  EditorView.theme({"&":{fontSize:`${options.fontSize}px`}}),
+];
 const extensions = [
-  lineNumbers(),
+  editorOptions.of(appearance(preferences)),
   history(),
   keymap.of([...defaultKeymap, ...historyKeymap]),
   markdownLanguage.of([]),
-  EditorView.lineWrapping,
   pluginExtensions.of([]),
 ];
 
@@ -30,6 +38,16 @@ const view = new EditorView({
   state: EditorState.create({ doc: "", extensions }),
   parent: document.getElementById("editor")!,
 });
+const numbers=document.getElementById("editor-line-numbers") as HTMLInputElement;
+const wrap=document.getElementById("editor-wrap") as HTMLInputElement;
+const fontSize=document.getElementById("editor-font-size") as HTMLSelectElement;
+numbers.checked=preferences.lineNumbers;wrap.checked=preferences.wrap;fontSize.value=String(preferences.fontSize);
+const updateEditorOptions=()=>{
+  const size=Number(fontSize.value);
+  preferences={lineNumbers:numbers.checked,wrap:wrap.checked,fontSize:([12,14,16,18,20].includes(size)?size:14) as EditorPreferences["fontSize"]};
+  saveEditorPreferences(preferences);view.dispatch({effects:editorOptions.reconfigure(appearance(preferences))});
+};
+numbers.onchange=wrap.onchange=fontSize.onchange=updateEditorOptions;
 
 const setDoc = (text: string) =>
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
@@ -41,8 +59,11 @@ const afterPaint = () => {
     .then((m) => view.dispatch({ effects: markdownLanguage.reconfigure(m.markdown()) }))
     .catch((e) => setStatus(`마크다운 언어 지원을 불러오지 못했습니다: ${(e as Error).message}`));
   import("./plugins-ui")
-    .then((m) => m.initPlugins(view, pluginExtensions, setStatus))
-    .catch((e) => setStatus(`플러그인 초기화 실패: ${(e as Error).message}`));
+    .then((m) => m.initPlugins(view, pluginExtensions, setStatus,()=>settings.open("plugins")))
+    .catch((e) => {
+      const message=`플러그인 초기화 실패: ${(e as Error).message}`;
+      document.getElementById("plugin-loading")!.textContent=message;setStatus(message);
+    });
   loadWord().catch(() => {
     /* retried on the first click; the error is shown there */
   });
@@ -53,7 +74,7 @@ let busy = false;
 async function run(label: string, fn: () => Promise<string[] | void>) {
   if (busy) return;
   busy = true;
-  const controls = [document.getElementById("load"), document.getElementById("apply"), mathOutput] as (HTMLButtonElement | HTMLSelectElement)[];
+  const controls = [document.getElementById("load"), document.getElementById("apply"), mathOutput,numbers,wrap,fontSize] as (HTMLButtonElement | HTMLSelectElement | HTMLInputElement)[];
   controls.forEach(c => c.disabled = true);
   try {
     setStatus(`${label}…`);

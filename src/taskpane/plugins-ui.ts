@@ -15,7 +15,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = "", cls = ""):
 }
 
 /** Wire the Obsidian plugin host to the task pane: file loading, list, commands, hotkeys. */
-export async function initPlugins(view: EditorView, compartment: Compartment, setStatus: (m: string) => void): Promise<PluginHost> {
+export async function initPlugins(view: EditorView, compartment: Compartment, setStatus: (m: string) => void,openPanel:()=>void=()=>{}): Promise<PluginHost> {
   const library = new PluginLibrary();
   const host = new PluginHost(new LocalDataStore(), (m) => setStatus(m));
   host.activeView = new MarkdownView(new ObsidianEditor(view));
@@ -82,10 +82,11 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
     }
     back.focus();
   };
+  document.getElementById("settings-dialog")?.addEventListener("close",()=>closeSettings());
   host.onOpenSettings = (id) => {
     const i = plugins.findIndex((p) => p.manifest.id === id && p.enabled);
     if (i >= 0) {
-      ($("plugins") as HTMLDetailsElement).open = true;
+      openPanel();
       openSettings(id);
     }
   };
@@ -113,6 +114,7 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
     list.replaceChildren(
       ...plugins.map((p) => {
         const row = el("div", "", "plugin-row");
+        row.dataset.pluginId=p.manifest.id;
         const head = el("div", `${p.manifest.name} ${p.manifest.version ?? ""}`, "plugin-name");
         const toggle = el("button", p.enabled ? "끄기" : "켜기");
         toggle.onclick = async () => {
@@ -141,7 +143,10 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
         return row;
       }),
     );
-    select.replaceChildren(...host.commands().map((c) => Object.assign(document.createElement("option"), { value: c.id, textContent: c.name })));
+    if(!plugins.length)list.append(el("p","불러온 플러그인이 없습니다.","option-help"));
+    const commands=host.commands();
+    select.replaceChildren(...commands.map((c) => Object.assign(document.createElement("option"), { value: c.id, textContent: c.name })));
+    select.disabled=commands.length===0;$<HTMLButtonElement>("plugin-run").disabled=commands.length===0;
   };
 
   host.onChange = () => {
@@ -180,5 +185,7 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
   plugins = await library.list();
   for (const p of plugins.filter((x) => x.enabled)) await host.load(p.manifest, p.mainJs, p.stylesCss);
   render();
+  $<HTMLInputElement>("plugin-files").disabled=false;
+  $("plugin-loading").hidden=true;
   return host;
 }
