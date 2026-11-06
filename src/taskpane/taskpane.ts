@@ -1,6 +1,8 @@
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { loadMathOutput, saveMathOutput } from "./preferences";
+import type { MathOutputMode } from "../convert/mathimg";
 
 // Heavy parts are separate chunks loaded after the first paint: the markdown language support (pulls in the
 // HTML/JS/CSS parsers), the converters + Word glue (`./word`) and the plugin subsystem (`./plugins-ui`).
@@ -8,6 +10,9 @@ const loadWord = () => import("./word");
 
 const status = document.getElementById("status")!;
 const setStatus = (msg: string) => (status.textContent = msg);
+const mathOutput = document.getElementById("math-output") as HTMLSelectElement;
+mathOutput.value = loadMathOutput();
+mathOutput.onchange = () => saveMathOutput(mathOutput.value === "images" ? "images" : "hybrid");
 
 // Extensions registered by loaded Obsidian community plugins are swapped into this compartment.
 const pluginExtensions = new Compartment();
@@ -44,13 +49,21 @@ const afterPaint = () => {
 };
 setTimeout(afterPaint, 0);
 
+let busy = false;
 async function run(label: string, fn: () => Promise<string[] | void>) {
+  if (busy) return;
+  busy = true;
+  const controls = [document.getElementById("load"), document.getElementById("apply"), mathOutput] as (HTMLButtonElement | HTMLSelectElement)[];
+  controls.forEach(c => c.disabled = true);
   try {
     setStatus(`${label}…`);
     const notes = (await fn()) ?? [];
     setStatus([`${label} 완료`, ...notes].join(" · "));
   } catch (e) {
     setStatus(`${label} 실패: ${(e as Error).message}`);
+  } finally {
+    busy = false;
+    controls.forEach(c => c.disabled = false);
   }
 }
 
@@ -72,6 +85,7 @@ Office.onReady((info) => {
       const { askConfirm } = await import("./confirm");
       const { missing, notes } = await replaceSelectionWithMarkdown(view.state.doc.toString(), (msg) =>
         askConfirm(document.body, msg, "바꾸기", "취소"),
+        { mathOutput: mathOutput.value as MathOutputMode },
       );
       if (missing.length) throw new Error(`복원할 수 없는 Word 객체: ${missing.join(", ")}`);
       return [...new Set(notes)];

@@ -6,8 +6,9 @@ describe("task pane start-up status", () => {
 
   beforeEach(() => {
     vi.resetModules();
+    localStorage.clear();
     document.body.innerHTML =
-      '<button id="load"></button><button id="apply"></button><div id="editor"></div><p id="status"></p>';
+      '<button id="load"></button><button id="apply"></button><select id="math-output"><option value="hybrid">hybrid</option><option value="images">images</option></select><div id="editor"></div><p id="status"></p>';
     ready = null;
     (globalThis as any).Office = { HostType: { Word: "Word" }, onReady: (cb: typeof ready) => (ready = cb) };
     vi.doMock("../src/taskpane/word", () => ({}));
@@ -47,5 +48,26 @@ describe("task pane start-up status", () => {
     ready!({ host: "Word" });
     expect(typeof document.getElementById("load")!.onclick).toBe("function");
     expect(document.querySelector(".cm-content")).not.toBeNull();
+  });
+
+  it("restores the math output choice and sends it to Word while preventing overlapping operations", async () => {
+    localStorage.setItem('oiw:math-output','images');
+    let finish!: () => void;
+    const applying = new Promise<void>(resolve=>{finish=resolve;});
+    const apply = vi.fn(async(_markdown: string, _confirm: unknown, _options: unknown)=>{await applying;return {missing:[],notes:[]};});
+    const read = vi.fn();
+    vi.doMock('../src/taskpane/word',()=>({replaceSelectionWithMarkdown:apply,readSelectionAsMarkdown:read}));
+    await import('../src/taskpane/taskpane');await settle();ready!({host:'Word'});
+    const button=document.getElementById('apply') as HTMLButtonElement;
+    const select=document.getElementById('math-output') as HTMLSelectElement;
+    expect(select.value).toBe('images');
+    button.click();await settle();
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply.mock.calls[0][2]).toEqual({mathOutput:'images'});
+    expect(button.disabled).toBe(true);expect(select.disabled).toBe(true);
+    button.click();(document.getElementById('load') as HTMLButtonElement).click();
+    expect(read).not.toHaveBeenCalled();expect(apply).toHaveBeenCalledTimes(1);
+    finish();await settle();expect(button.disabled).toBe(false);expect(select.disabled).toBe(false);
+    select.value='hybrid';select.dispatchEvent(new Event('change'));expect(localStorage.getItem('oiw:math-output')).toBe('hybrid');
   });
 });

@@ -9,6 +9,9 @@
 import { MATHIMG_VERSION, mathImgKey, type MathResolved } from "./equations";
 import type { Sidecar, SidecarEntry } from "./sidecar";
 
+/** Output preference for math spans that have editable LaTeX (opaque Word blocks stay verbatim). */
+export type MathOutputMode = "hybrid" | "images";
+
 /** Hard limits; anything beyond falls back to rung 3 (literal `$…$` text with a warning). */
 export const LIMITS = {
   /** Longest LaTeX source that is rendered. */
@@ -272,7 +275,7 @@ export interface MathImgPlan {
 }
 
 /** Fold the outcomes into the apply: picture packages for the good ones, literal text in the HTML for the rest. */
-export function planMathImages(html: string, equations: MathResolved[], outcomes: MathImgOutcome[]): MathImgPlan {
+export function planMathImages(html: string, equations: MathResolved[], outcomes: MathImgOutcome[], mode: MathOutputMode = "hybrid"): MathImgPlan {
   const byMarker = new Map(outcomes.map((o) => [o.item.marker, o]));
   const pictures: MathImgPlan["pictures"] = new Map();
   const active: MathResolved[] = [];
@@ -300,7 +303,9 @@ export function planMathImages(html: string, equations: MathResolved[], outcomes
   const literal = outcomes.length - pictures.size;
   const notes: string[] = [];
   if (pictures.size)
-    notes.push(`수식 ${pictures.size}개는 Word 수식으로 만들 수 없어 그림으로 넣었습니다 (불러오면 LaTeX로 다시 보입니다)`);
+    notes.push(mode === "images"
+      ? `설정에 따라 수식 ${pictures.size}개를 그림으로 넣었습니다 (불러오면 LaTeX로 다시 보입니다)`
+      : `수식 ${pictures.size}개는 Word 수식으로 만들 수 없어 그림으로 넣었습니다 (불러오면 LaTeX로 다시 보입니다)`);
   if (literal)
     notes.push(
       `경고: 수식 ${literal}개는 그림으로도 만들 수 없어 $…$ 소스 그대로 노란 표시로 넣었습니다 (${[...reasons]
@@ -316,11 +321,13 @@ export async function applyMathImages(
   equations: MathResolved[],
   sidecar: Sidecar,
   rasterizer: () => Promise<MathRasterizer> = async () => (await import("./mathraster")).createRasterizer(),
+  mode: MathOutputMode = "hybrid",
 ): Promise<MathImgPlan> {
+  const planned = mode === "images" ? equations.map(q => ({ ...q, omml: "", img: true })) : equations;
   const outcomes = await resolveMathImages(
-    equations.filter((q) => q.img),
+    planned.filter((q) => q.img),
     sidecar,
     rasterizer,
   );
-  return planMathImages(html, equations, outcomes);
+  return planMathImages(html, planned, outcomes, mode);
 }

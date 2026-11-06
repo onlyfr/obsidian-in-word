@@ -1,6 +1,10 @@
 :root { color-scheme: light dark; }
 body { margin: 0; font: 14px system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
 header { display: flex; gap: 8px; padding: 8px; }
+.preferences { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 0 8px 8px; }
+.preferences select { flex: 1; min-width: 0; }
+.preferences small { flex-basis: 100%; opacity: 0.75; }
+button:disabled, select:disabled { cursor: wait; opacity: 0.6; }
 button { flex: 1; padding: 6px 8px; cursor: pointer; }
 #editor { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid #8884; }
 .cm-editor { height: 100%; }

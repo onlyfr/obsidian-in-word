@@ -257,6 +257,25 @@ describe("ladder decision", () => {
 });
 
 describe("plan: literal text, notes, packages", () => {
+  it("images mode renders native-capable math too, without mutating the original plan", async () => {
+    const sc=new MemorySidecar();
+    const r=renderWithSidecar(`$x^2$ and $${BOXED}$`,sc);
+    const before=structuredClone(r.equations);
+    const f=fake();
+    const plan=await applyMathImages(r.html,r.equations,sc,f.loader,'images');
+    expect(plan.pictures.size).toBe(2);expect(plan.active.every(q=>q.img && !q.omml)).toBe(true);
+    expect(plan.notes[0]).toContain('설정에 따라');expect(plan.notes[0]).not.toContain('만들 수 없어');
+    expect(r.equations).toEqual(before);
+    const repeat=fake();await applyMathImages(r.html,r.equations,sc,repeat.loader,'images');expect(repeat.calls).toEqual([]);
+    const hybrid=await applyMathImages(r.html,r.equations,sc,fake().loader,'hybrid');
+    expect(hybrid.pictures.size).toBe(1);expect(hybrid.active[0].omml).toContain('oMath');
+  });
+
+  it("images mode preserves source text with a warning if a render fails",async()=>{
+    const sc=new MemorySidecar();const r=renderWithSidecar('$x^2$',sc);
+    const plan=await applyMathImages(r.html,r.equations,sc,fake(()=>{throw new RasterError('unavailable');}).loader,'images');
+    expect(plan.pictures.size).toBe(0);expect(plan.html).toContain('$x^2$');expect(plan.notes[0]).toContain('경고');
+  });
   it("literal fallbacks are written into the HTML (highlighted, escaped), pictures keep their marker", async () => {
     const src = `a $${BOXED}$ b $x<y\\foobar$ c\n\n$$${XRA}$$`;
     const r = renderWithSidecar(src, new MemorySidecar());

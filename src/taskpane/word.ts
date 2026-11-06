@@ -1,4 +1,6 @@
 import { leftoverChecks } from "./markers";
+import type { MathOutputMode } from "../convert/mathimg";
+import { trailingBlankParagraphs } from "../convert/trailing-blanks";
 import { hashId, normText, placeholderIds, type FloatBlock, type FloatReport } from "../convert/blocks";
 import {
   BLANK_TOKEN,
@@ -150,6 +152,14 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     for (const it of scan.items) if (it.kind === "eq" && it.paraXml) it.paraPkg = await gz(wrapPackage(it.paraXml));
     // getHtml references images by a temp file that is gone later; keep the real bytes in the sidecar instead.
     const pictures = selection.inlinePictures.items.map((p) => p.getBase64ImageSrc());
+    // Empty text can still be a picture-only paragraph. Load just the empty tail's picture collections in the same
+    // batch so phantom-blank correction does not mistake a display math picture for a spacing paragraph.
+    const trailing: Word.Paragraph[] = [];
+    const paragraphs = selection.paragraphs.items;
+    for (let i = paragraphs.length - 1; i >= 0 && paragraphs[i].tableNestingLevel === 0 && !paragraphs[i].text.trim(); i--) {
+      trailing.push(paragraphs[i]);
+      paragraphs[i].inlinePictures.load("items");
+    }
     await context.sync();
     const floatOoxml = await captureFloatOoxml(context, selection, findFloatingBlocks(html.value));
     // getHtml has no real names for built-in styles (Quote, ...); ask Office.js for the localized names.
@@ -162,7 +172,8 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     const tableReport: TableReport = { total: 0, simple: 0, opaque: 0, unpaired: 0, reasons: {} };
     const tableCaps = await Promise.all(scanTables(selOoxml.value).map(async (raw) => ({ raw, gz: await gz(raw), rels: tableRels(raw, selOoxml.value) })));
     const markdown = htmlToMarkdown(
-      html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport, trailingBlanks(selection.paragraphs.items),
+      html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport,
+      trailingBlankParagraphs(trailing.reverse().map(p => ({ text: p.text, tableNestingLevel: p.tableNestingLevel, hasInlinePictures: p.inlinePictures.items.length > 0 }))),
     );
     lastRegion = regionSignature(selection.paragraphs.items.map((p) => p.text));
     // Objects referenced by the markdown just produced are marked as used; other regions' entries are left alone.
@@ -201,18 +212,13 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim();
  */
 export const regionSignature = (paragraphs: string[]) => `${paragraphs.length}:${hashId(paragraphs.map(norm).join("\n"))}`;
 let lastRegion: string | null = null;
-/** Empty top-level paragraphs at the end of the selection (those in tables do not count). */
-const trailingBlanks = (ps: { text: string; tableNestingLevel: number }[]) => {
-  let n = 0;
-  for (let i = ps.length - 1; i >= 0 && ps[i].tableNestingLevel === 0 && !ps[i].text.trim(); i--) n++;
-  return n;
-};
 
 /** Replace the current selection in Word with the rendered markdown, restoring Word-only objects. */
 export async function replaceSelectionWithMarkdown(
   markdown: string,
   /** Asks the user (true = go on) when the selection is not the region that was last loaded/applied. */
   confirm?: (message: string) => Promise<boolean>,
+  options: { mathOutput?: MathOutputMode } = {},
 ): Promise<ApplyResult> {
   return Word.run(async (context) => {
     // A collapsed selection (just a cursor) cannot be read (getHtml throws GeneralException), and replacing it would
@@ -282,8 +288,8 @@ export async function replaceSelectionWithMarkdown(
     let active = equations;
     let pictures = new Map<string, { body: string; rels: string; parts: string }>();
     const mathNotes: string[] = [];
-    if (equations.some((q) => q.img)) {
-      const plan = await (await import("../convert/mathimg")).applyMathImages(html0, equations, sidecar);
+    if (equations.some((q) => q.img) || (options.mathOutput === "images" && equations.length)) {
+      const plan = await (await import("../convert/mathimg")).applyMathImages(html0, equations, sidecar, undefined, options.mathOutput);
       ({ html, active, pictures } = plan);
       mathNotes.push(...plan.notes);
     }
