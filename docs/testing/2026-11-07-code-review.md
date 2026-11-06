@@ -33,7 +33,10 @@
 - 선택 알림 누락 두 경우와 HTML 변조는 수정 전 실패 → 수정 후 통과를 확인했다.
 - 대기 중 실제 조합 상태가 active로 바뀌면 게이트를 다시 열지 않는 회귀도 추가했다.
 - 실제 Word 선택 시험에 B 렌더링 완료 응답을 일부러 지연시키고, debounce보다 오래 기다리는 동안 B→A→B로 이동하는 재현 사례를 추가했다.
-- 최신 변경의 실제 Word 재검사는 사용자 포커스 유지 시간 응답을 기다리는 중이다. 아직 통과로 기록하지 않는다.
+- 실제 Word 선택·소유권 및 지연된 B→A→B 전환: `test-docs/word-host/20261107-002808-82e0f6/native-selection-summary.json` 전체 통과.
+- 실제 Word 서식·응답 유실·Word Undo: `test-docs/word-host/20261107-002846-bb8ee4/native-format-summary.json` 전체 통과.
+- 기존 Office.js WordBodyPort 세션·저장 후 재열기·Undo/Redo·삭제 가드: `test-docs/word-host/20261107-002947-045fd7` 전체 통과.
+- 첫 선택 시험은 포커스가 바뀌어 unknown 게이트에서 중단됐다. 재실행은 통과했다. 기존 세션 시험의 `복구` 문구 단정은 현재 `Ctrl+Z` 정책에 맞게 수정하고 다시 통과했다. 새로운 실행 취소/복구 기능을 추가한 것은 아니다.
 
 ## 별도 배포 상태
 
