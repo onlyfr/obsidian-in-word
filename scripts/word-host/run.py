@@ -74,6 +74,8 @@ def summarize(directory, results):
         'undoSteps': undo,
         'retention': by_id['retention']['value'], 'large': large,
         'raster': by_id['raster']['value'],
+        'mathOutput': by_id['math-output']['value'],
+        'bodyProbe': by_id['body-finish']['value'],
     }
     (directory / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     report = f'''# Native Word acceptance results
@@ -90,6 +92,8 @@ All cases passed. The runner used a fresh synthetic document and real Office.js 
 | Undo: normal with style / without style / failed apply | {undo['style']} / {undo['plain']} / {undo['fail']} steps; text and object counts restored |
 | 100-day-old long formula in another region | LaTeX retained; editable after reading region B |
 | Math raster corpus | {summary['raster']['count']} inline/display samples; baseline PNG comparison: {summary['raster']['compared']} |
+| Math output choice | hybrid -> all images -> hybrid; LaTeX and image bytes retained |
+| Body source feasibility | One ordinary paragraph enters source on selection and renders edited bold/italic on exit |
 | Large synthetic document | {large['paragraphs']} Office.js paragraphs, 30 tables, 60 equations; 3 stable applies |
 
 Large load: {large['loadMs']/1000:.2f}s. Apply cycles: {', '.join(f"{c['ms']/1000:.2f}s" for c in large['cycles'])}.
@@ -176,6 +180,12 @@ def main():
                 command(run, 'js', 'raster-reference', 'globalThis.rasterBaselineUrl=' + json.dumps(url) + '; return true;')
             case('js', 'raster', 'raster.js')
             case('js', 'large', 'large.js')
+            case('js', 'math-output', 'math-output.js')
+            case('js', 'body-start', 'body-start.js')
+            case('com', 'body-enter', 'body-enter.ps1')
+            case('js', 'body-source', 'body-source.js')
+            case('com', 'body-edit-exit', 'body-edit-exit.ps1')
+            case('js', 'body-finish', 'body-finish.js')
             summarize(run, results)
             print(f'All Word acceptance cases passed. Report: {run / "report.md"}', flush=True)
         finally:
