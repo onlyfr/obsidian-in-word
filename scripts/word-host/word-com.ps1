@@ -48,6 +48,10 @@ try {
   Start-Sleep -Milliseconds 250
  }
 } finally {
+ if($null -ne $nativeImeBridge){
+  New-Item -ItemType File -Path $nativeImeStop -Force | Out-Null
+  [void]$nativeImeBridge.WaitForExit(5000)
+ }
  if($null -ne $doc){$doc.Close(0)}
  $discard = 0
  $wordTestApp.Quit([ref]$discard)

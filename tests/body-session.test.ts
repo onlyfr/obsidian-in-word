@@ -61,6 +61,20 @@ describe('experimental body editing sessions',()=>{
   port.blocks.get('a')!.mode='rendered';await select('b');
   expect(session.pausedReason).toBeTruthy();expect(port.calls).toHaveLength(before);expect(port.blocks.get('b')!.mode).toBe('rendered');
  });
+ it('does not close a source after selection returned while its read was pending',async()=>{
+  const {port,session,select}=setup();await select('a');let release!:()=>void;
+  const read=port.read.bind(port);let wait=true;
+  port.read=async key=>{const block=await read(key);if(wait){wait=false;await new Promise<void>(r=>{release=r;});}return block;};
+  const leaving=select(null);await tick();const returning=select('a');release();await Promise.all([leaving,returning]);
+  expect(port.calls.filter(c=>c==='render:a')).toHaveLength(0);expect(session.activeKey).toBe('a');
+ });
+ it('honors composition that began during an in-flight source read',async()=>{
+  const {port,session,select}=setup();await select('a');let release!:()=>void;
+  const read=port.read.bind(port);let wait=true;
+  port.read=async key=>{const block=await read(key);if(wait){wait=false;await new Promise<void>(r=>{release=r;});}return block;};
+  const leaving=select(null);await tick();const closing=session.composition(true);release();await Promise.all([leaving,closing]);
+  expect(port.blocks.get('a')!.mode).toBe('source');await session.composition(false);expect(port.blocks.get('a')!.mode).toBe('rendered');
+ });
  it('pauses on deletion and never recreates the missing block from a matching-text neighbor',async()=>{
   const {port,session,select}=setup();await select('a');port.blocks.delete('a');await session.reconcile();
   await expect(session.recover('a','original')).rejects.toThrow('찾을 수 없습니다');

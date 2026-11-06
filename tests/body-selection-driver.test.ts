@@ -38,3 +38,14 @@ it('disposal invalidates pending work and keeps the session paused',async()=>{
  vi.useFakeTimers();const {driver,session,target}=setup();await driver.signal('idle');target.mockClear();driver.notify();driver.dispose();
  await vi.advanceTimersByTimeAsync(500);expect(target).not.toHaveBeenCalled();expect(session.pause).toHaveBeenCalled();
 });
+it('repeated idle health frames do not query Word again',async()=>{
+ const {driver,target,session}=setup();await driver.signal('idle');target.mockClear();session.composition.mockClear();
+ await driver.signal('idle');await driver.signal('idle');expect(target).not.toHaveBeenCalled();expect(session.composition).not.toHaveBeenCalled();driver.dispose();
+});
+it('does not fan out selection reads while an earlier read is pending',async()=>{
+ vi.useFakeTimers();const {driver,target,session}=setup();await driver.signal('idle');session.select.mockClear();
+ let release!:(value:string|null)=>void;target.mockImplementationOnce(()=>new Promise(r=>{release=r;}));
+ driver.notify();await vi.advanceTimersByTimeAsync(100);driver.notify();await vi.advanceTimersByTimeAsync(100);
+ expect(target).toHaveBeenCalledTimes(2);release('stale');await vi.advanceTimersByTimeAsync(0);
+ expect(session.select).toHaveBeenCalledExactlyOnceWith('a');expect(target).toHaveBeenCalledTimes(3);driver.dispose();
+});

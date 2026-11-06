@@ -119,14 +119,18 @@ export class BodyEditSession {
       while (this.handled < this.generation && !this.pausedReason && !this.composing) {
         const generation = this.generation;
         const target = this.desired;
+        let observed: BodyBlock | null = null;
         if (this.activeKey) {
-          const observed = await this.port.read(this.activeKey);
+          observed = await this.port.read(this.activeKey);
           if (!observed || observed.mode !== "source") {
             this.pause("문단 삭제 또는 실행 취소로 상태가 바뀌었습니다. 자동 편집을 멈췄습니다");
             break;
           }
         }
-        if (this.activeKey && this.activeKey !== target) await this.leave(this.activeKey);
+        if (this.composing || this.pausedReason) break;
+        if (generation !== this.generation) continue;
+        // Reuse the verified source snapshot; the port checks its revision immediately before mutation.
+        if (observed && this.activeKey !== target) await this.leave(observed);
         if (!this.pausedReason && !this.composing && generation === this.generation && target && target !== this.activeKey) {
           try { await this.enter(target, generation); }
           catch (e) { if (!(e instanceof SelectionMoved)) throw e; }
@@ -158,12 +162,8 @@ export class BodyEditSession {
     await this.port.save({...journal, phase: "editing"});
   }
 
-  private async leave(key: string): Promise<void> {
-    const block = await this.port.read(key);
-    if (!block || block.mode !== "source") {
-      this.pause("문서 상태가 바뀌었습니다. 실행 취소 또는 삭제를 확인하고 복구하세요");
-      return;
-    }
+  private async leave(block: BodyBlock): Promise<void> {
+    const key = block.key;
     const journal = (await this.port.journals()).find(j => j.key === key);
     if (!journal) throw new Error("복구 기록이 없어 자동 변환을 중단했습니다");
     const html = this.codec.html(block.text);
