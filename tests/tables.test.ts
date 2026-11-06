@@ -79,7 +79,7 @@ describe("load: simple tables become GFM tables", () => {
     expect(tbl("| a | b | c |")).toBe("| a | b | c |\n| --- | --- | --- |\n| d | e | f |\n| g | h | i |");
     expect(tbl("| H1 | H2 |")).toBe("| H1 | H2 |\n| --- | --- |\n| x | y |"); // header bold/shading do not show as markdown
     expect(tbl("| L | C | R |")).toBe("| L | C | R |\n| --- | :---: | ---: |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |");
-    expect(tbl("| fmt | val |")).toBe("| fmt | val |\n| --- | --- |\n| **bold** _ital_ strike code | [link](https://example.com/p) |");
+    expect(tbl("| fmt | val |")).toBe("| fmt | val |\n| --- | --- |\n| **bold** _ital_ ~~strike~~ code | [link](https://example.com/p) |");
     expect(tbl("| p | q |")).toBe("| p | q |\n| --- | --- |\n| a \\| b | line1<br>line2 |");
     expect(tbl("|   | x |")).toBe("|   | x |\n| --- | --- |\n| y |   |");
     expect(tbl("| only |")).toBe("| only |\n| --- |\n| one |\n| col |");
@@ -174,7 +174,7 @@ describe("apply: lossless first", () => {
   });
 
   it("markdown formatting becomes runs (bold, italic, strike, code, links, breaks)", () => {
-    const res = renderWithSidecar(md.replace("| **bold** _ital_ strike code | [link](https://example.com/p) |", "| **b** _i_ ~~s~~ `c` x<br>y | [t](https://e.example/x) |"), sidecar, src);
+    const res = renderWithSidecar(md.replace("| **bold** _ital_ ~~strike~~ code | [link](https://example.com/p) |", "| **b** _i_ ~~s~~ `c` x<br>y | [t](https://e.example/x) |"), sidecar, src);
     const x = res.tables[3].ooxml;
     expect(x).toMatch(/<w:b\/>[\s\S]*>b</);
     expect(x).toContain("<w:i/>");

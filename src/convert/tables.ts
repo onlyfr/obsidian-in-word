@@ -9,6 +9,7 @@
  */
 import MarkdownIt from "markdown-it";
 import { hashId } from "./blocks";
+import { normalizeInlineFormatting } from "./inline-format";
 import { OMML_PKG_NAMESPACES } from "./math";
 
 export type Align = "" | "l" | "c" | "r";
@@ -120,12 +121,12 @@ export function analyzeHtmlTable(table: Element, cellMd: (inlineHtml: string) =>
       const p = kids[0];
       if (p && !/^(MsoNormal|)$/.test(p.className.trim())) return no("styled cell paragraph");
       if (Array.from(td.querySelectorAll("*")).some((e) => e.tagName.includes(":") && !/^o:p$/i.test(e.tagName))) return no("unsupported cell content");
-      let clone: Element = p ?? td;
+      const clone = (p ?? td).cloneNode(true) as Element;
       if (header && ri === 0) {
         // header bold comes from the table style: do not show it as ** in markdown
-        clone = clone.cloneNode(true) as Element;
         for (const b of Array.from(clone.querySelectorAll("b, strong"))) b.replaceWith(...Array.from(b.childNodes));
       }
+      normalizeInlineFormatting(clone);
       let md = cellMd(clone.innerHTML)
         .replace(/ *\n */g, "<br>")
         .replace(/(?:<br>)+$/g, "")

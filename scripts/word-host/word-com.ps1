@@ -2,6 +2,7 @@ param([Parameter(Mandatory=$true)][string]$RunDirectory)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $RunDirectory).Path
 $wordHarnessScripts = $PSScriptRoot
+. (Join-Path $PSScriptRoot 'native-write.ps1')
 if(Get-Process WINWORD -ErrorAction SilentlyContinue) { throw 'Close Word before running native acceptance tests.' }
 $wordTestApp = New-Object -ComObject Word.Application
 $doc = $null

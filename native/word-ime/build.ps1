@@ -13,9 +13,9 @@ $build=Join-Path $output 'compile.cmd'
 @echo off
 call "$vcvars" >nul
 if errorlevel 1 exit /b 1
-cl /nologo /W4 /WX /EHsc /std:c++17 /DIME_OBSERVER_DLL /LD "$source" /Fo:observer.obj /Fe:word-ime-observer.dll ole32.lib user32.lib uuid.lib
+cl /nologo /W4 /WX /EHsc /std:c++17 /DIME_OBSERVER_DLL /LD "$source" /Fo:observer.obj /Fe:word-ime-observer.dll ole32.lib oleaut32.lib oleacc.lib user32.lib uuid.lib
 if errorlevel 1 exit /b 1
-cl /nologo /W4 /WX /EHsc /std:c++17 "$source" /Fo:bridge.obj /Fe:word-ime-bridge.exe ole32.lib user32.lib uuid.lib
+cl /nologo /W4 /WX /EHsc /std:c++17 "$source" /Fo:bridge.obj /Fe:word-ime-bridge.exe ole32.lib oleaut32.lib oleacc.lib user32.lib uuid.lib
 exit /b %errorlevel%
 "@ | Set-Content -LiteralPath $build -Encoding ascii
 Push-Location -LiteralPath $output

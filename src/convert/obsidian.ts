@@ -105,6 +105,10 @@ export function markdownToHtml(src: string): string {
 }
 
 const td = new TurndownService({ headingStyle: "atx", bulletListMarker: "-", codeBlockStyle: "fenced" });
+td.addRule("wordStrike", {filter: node => node.nodeName === "S" || node.nodeName === "STRIKE", replacement: content => content ? `~~${content}~~` : ""});
+// Escape literal tildes as text, before semantic strike delimiters are added by replacement rules.
+const escapeText = td.escape.bind(td);
+td.escape = text => escapeText(text).replace(/~/g, "\\~");
 
 /** Strip Word-specific noise from getHtml() output and keep only the body. */
 /**
@@ -286,7 +290,7 @@ function cellMarkdown(inlineHtml: string): string {
   return td
     .turndown(`<div>${inlineHtml}</div>`)
     .replace(/\\\[\\\[(.+?)\\\]\\\]/g, "[[$1]]") // turndown escapes the brackets of plain-text [[wikilinks]]
-    .replace(/(`[^`\n]*`|\$|~~)/g, (m) => (m === "$" ? "\\$" : m === "~~" ? "\\~~" : m)); // a literal $ / ~~ must not read as math / strike
+    .replace(/(`[^`\n]*`|\$)/g, (m) => (m === "$" ? "\\$" : m)); // literal dollars must not read as math
 }
 
 /**

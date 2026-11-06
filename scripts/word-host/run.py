@@ -115,6 +115,8 @@ def main():
     parser.add_argument('--dev-settings-dir', type=Path, help='Path to installed office-addin-dev-settings package')
     parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
+    parser.add_argument('--format-only', action='store_true', help='Run only Markdown formatting round-trip regression cases')
+    parser.add_argument('--native-guard-only', action='store_true', help='Build and test the native source-write boundary without keyboard injection')
     parser.add_argument('--body-input-only', action='store_true', help='Run caret/virtual-key/IME observability probes in an owned Word instance')
     parser.add_argument('--native-ime', action='store_true', help='Build and attach the experimental x64 TSF observer (requires --body-input-only and Visual Studio C++/SDK)')
     args = parser.parse_args()
@@ -149,7 +151,7 @@ def main():
         (run / 'baseline-raster.ts').write_text(before, encoding='utf-8')
     manifest = run / 'manifest.xml'
     env = {**os.environ, 'WORD_HOST_RUN_DIR': str(run), 'WORD_HOST_PORT': str(port)}
-    if args.native_ime:
+    if args.native_ime or args.native_guard_only:
         output = run / 'native'
         subprocess.run(['powershell.exe', '-NoProfile', '-File', str(REPO / 'native/word-ime/build.ps1'), '-OutputDirectory', str(output)], check=True)
         env['WORD_IME_BRIDGE_EXE'] = str(output / 'word-ime-bridge.exe')
@@ -186,6 +188,22 @@ def main():
                 case('js','session-undo-recover','session-undo-recover.js')
                 case('com','session-delete','session-delete.ps1')
                 case('js','session-delete-check','session-delete-check.js')
+            if args.native_guard_only:
+                case('js','setup','setup.js')
+                case('js','input-start','input-start.js')
+                case('com','input-place','input-place.ps1')
+                case('js','input-enter','input-enter.js')
+                case('com','native-ime-start','native-ime-start.ps1')
+                case('com','native-guard-check','native-guard-check.ps1')
+                (run/'guard-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Native source-write guard passed. Evidence: {run}',flush=True)
+                return
+            if args.format_only:
+                case('js','setup','setup.js')
+                case('js','format-roundtrip','format-roundtrip.js')
+                (run/'format-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Formatting round trips passed. Evidence: {run}',flush=True)
+                return
             if args.body_input_only:
                 case('js','setup','setup.js')
                 case('js','input-start','input-start.js')
@@ -239,6 +257,7 @@ def main():
             case('js', 'raster', 'raster.js')
             case('js', 'large', 'large.js')
             case('js', 'math-output', 'math-output.js')
+            case('js', 'format-roundtrip', 'format-roundtrip.js')
             case('js', 'body-start', 'body-start.js')
             case('com', 'body-enter', 'body-enter.ps1')
             case('js', 'body-source', 'body-source.js')
