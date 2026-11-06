@@ -8,20 +8,22 @@ struct SourceWrite {
     LONG expectedSequence, caretReserved;
     wchar_t tag[128], controlId[32], expected[4001], replacement[4001], xml[262144];
 };
-struct GuardFailure { LONG result; };
+struct GuardFailure { LONG result; HRESULT hr = S_OK; const wchar_t* member = nullptr; };
 struct Dispatch {
     ComPtr<IDispatch> object;
     Dispatch() = default;
     explicit Dispatch(IDispatch* value) : object(value) {}
     VARIANT call(const wchar_t* name, WORD flags = DISPATCH_PROPERTYGET, VARIANT* args = nullptr, UINT count = 0) const {
         LPOLESTR member = const_cast<LPOLESTR>(name); DISPID id;
-        if (!object || FAILED(object->GetIDsOfNames(IID_NULL, &member, 1, LOCALE_USER_DEFAULT, &id))) throw GuardFailure{8};
+        if (!object) throw GuardFailure{8,E_POINTER,name};
+        HRESULT lookup = object->GetIDsOfNames(IID_NULL, &member, 1, LOCALE_USER_DEFAULT, &id);
+        if (FAILED(lookup)) throw GuardFailure{8,lookup,name};
         DISPID put = DISPID_PROPERTYPUT;
         DISPPARAMS params{args, flags == DISPATCH_PROPERTYPUT ? &put : nullptr, count, flags == DISPATCH_PROPERTYPUT ? 1U : 0U};
         VARIANT result; VariantInit(&result); EXCEPINFO error{}; UINT badArgument = 0;
         HRESULT hr = object->Invoke(id, IID_NULL, LOCALE_USER_DEFAULT, flags, &params, &result, &error, &badArgument);
         SysFreeString(error.bstrSource); SysFreeString(error.bstrDescription); SysFreeString(error.bstrHelpFile);
-        if (FAILED(hr)) { VariantClear(&result); throw GuardFailure{8}; }
+        if (FAILED(hr)) { VariantClear(&result); throw GuardFailure{8,hr,name}; }
         return result;
     }
     Dispatch child(const wchar_t* name, VARIANT* args = nullptr, UINT count = 0) const {
@@ -53,17 +55,29 @@ inline std::wstring normalizedXml(const std::wstring& xml) {
     return std::regex_replace(std::regex_replace(xml, attributes, L""), revisions, L"");
 }
 inline bool terminated(const wchar_t* buffer, size_t size) { return wmemchr(buffer, L'\0', size) != nullptr; }
-inline bool validWrite(const SourceWrite& request) {
+inline bool validWrite(const SourceWrite& request, bool allowRendered = false) {
     return terminated(request.tag, 128) && terminated(request.controlId, 32) && terminated(request.expected, 4001)
         && terminated(request.replacement, 4001) && terminated(request.xml, 262144)
         && wcsncmp(request.tag, L"owb-body:v1:", 12) == 0
-        && std::wstring(request.tag).size() >= 7 && std::wstring(request.tag).compare(wcslen(request.tag) - 7, 7, L":source") == 0
+        && (std::wstring(request.tag).size() >= 7 && std::wstring(request.tag).compare(wcslen(request.tag) - 7, 7, L":source") == 0
+            || allowRendered && std::wstring(request.tag).size() >= 9 && std::wstring(request.tag).compare(wcslen(request.tag) - 9, 9, L":rendered") == 0)
         && !wcspbrk(request.expected, L"\r\n") && !wcspbrk(request.replacement, L"\r\n");
 }
 
 // Resolve and validate on Word's UI thread. The caller rechecks live TSF state immediately before the single put.
-inline Dispatch checkedSourceRange(HWND window, const wchar_t* documentPath, const SourceWrite& request) {
-    if (!validWrite(request)) throw GuardFailure{6};
+inline void setNumber(const Dispatch& object, const wchar_t* property, LONG value) {
+    VARIANT argument{}; argument.vt = VT_I4; argument.lVal = value;
+    VARIANT result = object.call(property, DISPATCH_PROPERTYPUT, &argument, 1); VariantClear(&result);
+}
+inline void setText(const Dispatch& object, const wchar_t* property, const wchar_t* value) {
+    StringArgument argument(value); VARIANT result = object.call(property, DISPATCH_PROPERTYPUT, &argument.value, 1); VariantClear(&result);
+}
+inline void invoke(const Dispatch& object, const wchar_t* method, VARIANT* args = nullptr, UINT count = 0) {
+    VARIANT result = object.call(method, DISPATCH_METHOD, args, count); VariantClear(&result);
+}
+struct CheckedBody { Dispatch doc, control, range, selection; };
+inline CheckedBody checkedBody(HWND window, const wchar_t* documentPath, const SourceWrite& request, bool allowRendered = false) {
+    if (!validWrite(request, allowRendered)) throw GuardFailure{6};
     GUITHREADINFO gui{sizeof(GUITHREADINFO)};
     if (!GetGUIThreadInfo(GetCurrentThreadId(), &gui) || GetAncestor(gui.hwndFocus, GA_ROOT) != GetAncestor(window, GA_ROOT)) throw GuardFailure{2};
     ComPtr<IDispatch> native;
@@ -78,11 +92,15 @@ inline Dispatch checkedSourceRange(HWND window, const wchar_t* documentPath, con
     Dispatch control = controls.child(L"Item", &index, 1);
     if (control.text(L"ID") != request.controlId || control.text(L"Tag") != request.tag) throw GuardFailure{4};
     Dispatch range = control.child(L"Range");
-    if (range.number(L"StoryType") != 1 || range.child(L"Paragraphs").number(L"Count") != 1 || range.child(L"Tables").number(L"Count")
+    if (allowRendered && !range.text(L"Text").empty() && range.text(L"Text").back() == L'\r') setNumber(range, L"End", range.number(L"End") - 1);
+    if (range.number(L"StoryType") != 1 || range.child(L"Paragraphs").number(L"Count") != 1 || range.child(L"ListFormat").number(L"ListType") != 0 || range.child(L"Tables").number(L"Count")
         || range.child(L"Fields").number(L"Count") || range.child(L"InlineShapes").number(L"Count") || range.child(L"Revisions").number(L"Count")) throw GuardFailure{6};
     const std::wstring xml = range.text(L"WordOpenXML");
     static const std::wregex objects(LR"(<(?:w:(?:drawing|pict|object|fldChar|fldSimple|footnoteReference|endnoteReference|ins|del|commentRangeStart)|m:oMath(?:Para)?)[\s/>])");
     if (std::regex_search(xml, objects)) throw GuardFailure{6};
     if (range.text(L"Text") != request.expected || normalizedXml(xml) != normalizedXml(request.xml)) throw GuardFailure{5};
-    return range;
+    return {doc, control, range, view.child(L"Selection").child(L"Range").child(L"Duplicate")};
+}
+inline Dispatch checkedSourceRange(HWND window, const wchar_t* documentPath, const SourceWrite& request) {
+    return checkedBody(window, documentPath, request).range;
 }

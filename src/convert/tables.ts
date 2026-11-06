@@ -260,8 +260,8 @@ const cellMd = new MarkdownIt({ html: false, linkify: false });
 const xesc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Runs for one cell's markdown. `base` is the run-property markup to start from (font, size, ...). */
-export function inlineToRuns(md: string, base = "", bold = false): string {
-  const text = md.replace(/<br\s*\/?>/gi, "\n");
+export function inlineToRuns(md: string, base = "", bold = false, options: {htmlBreaks?: boolean} = {}): string {
+  const text = options.htmlBreaks === false ? md : md.replace(/<br\s*\/?>/gi, "\n");
   const tokens = cellMd.parseInline(text, {});
   const kids = tokens[0]?.children ?? [];
   let b = bold ? 1 : 0, i = 0, s = 0;

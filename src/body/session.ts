@@ -14,6 +14,15 @@ export interface BodyJournal {
   originalStyle: string;
   originalRevision: string;
   phase: "opening" | "editing" | "closing" | "closed";
+  /** Native host reports the last durable step of an interrupted transition. */
+  nativeStage?: "prepared" | "content" | "tagged";
+}
+export interface BodyCommit {
+  mode: "source" | "rendered";
+  markdown: string;
+  html?: string;
+  style: string;
+  journal: BodyJournal;
 }
 export interface BodyPort {
   read(key: string): Promise<BodyBlock | null>;
@@ -21,6 +30,8 @@ export interface BodyPort {
   save(journal: BodyJournal): Promise<void>;
   source(expected: BodyBlock, markdown: string): Promise<void>;
   render(expected: BodyBlock, html: string, style: string): Promise<void>;
+  /** A native host owns journaling, mutation, mode and selection inside one checked operation. */
+  commit?(expected: BodyBlock, change: BodyCommit): Promise<void>;
 }
 export interface BodyCodec {
   markdown(html: string): string;
@@ -69,7 +80,7 @@ export class BodyEditSession {
     const out: string[] = [];
     for (const journal of await this.port.journals()) {
       const block = await this.port.read(journal.key);
-      if (block && (block.mode === "source" || (journal.phase !== "closed" && block.revision !== journal.originalRevision))) out.push(journal.key);
+      if (block && (block.mode === "source" || (journal.phase !== "closed" && (!!journal.nativeStage || block.revision !== journal.originalRevision)))) out.push(journal.key);
     }
     return out;
   }
@@ -88,6 +99,8 @@ export class BodyEditSession {
     const journal = (await this.port.journals()).find(j => j.key === key);
     const block = await this.port.read(key);
     if (!journal || !block) throw new Error("복구할 소스 문단을 안전하게 찾을 수 없습니다");
+    if (choice === "current" && (journal.nativeStage === "content" || journal.nativeStage === "prepared"))
+      throw new Error("내용 교체 후 모드 기록 전에 중단됐습니다. 원본 복구 또는 수동 확인이 필요합니다");
     if (choice === "current" && block.mode === "rendered") {
       if (journal.phase !== "closing" && block.revision !== journal.originalRevision)
         throw new Error("중단된 전환의 현재 내용을 판단할 수 없습니다. 원본 복구 또는 수동 확인이 필요합니다");
@@ -97,8 +110,11 @@ export class BodyEditSession {
     }
     const markdown = choice === "original" ? journal.originalMarkdown : block.text;
     const html = this.codec.html(markdown);
-    await this.port.render(block, html, journal.originalStyle);
-    await this.port.save({...journal, phase: "closed"});
+    if (this.port.commit) await this.port.commit(block, {mode: "rendered", markdown, html, style: journal.originalStyle, journal: {...journal, phase: "closing"}});
+    else {
+      await this.port.render(block, html, journal.originalStyle);
+      await this.port.save({...journal, phase: "closed"});
+    }
     this.activeKey = null;
   }
 
@@ -155,6 +171,11 @@ export class BodyEditSession {
     this.codec.html(markdown); // Validate before journaling or touching the block.
     if (generation !== this.generation || this.composing || this.pausedReason) return;
     const journal: BodyJournal = {version: 1, key, originalMarkdown: markdown, originalStyle: block.style, originalRevision: block.revision, phase: "opening"};
+    if (this.port.commit) {
+      await this.port.commit(block, {mode: "source", markdown, style: block.style, journal});
+      this.activeKey = key;
+      return;
+    }
     await this.port.save(journal);
     if (generation !== this.generation || this.composing || this.pausedReason) return;
     await this.port.source(block, markdown);
@@ -168,6 +189,11 @@ export class BodyEditSession {
     if (!journal) throw new Error("복구 기록이 없어 자동 변환을 중단했습니다");
     const html = this.codec.html(block.text);
     if (this.composing || this.pausedReason) return;
+    if (this.port.commit) {
+      await this.port.commit(block, {mode: "rendered", markdown: block.text, html, style: journal.originalStyle, journal: {...journal, phase: "closing"}});
+      this.activeKey = null;
+      return;
+    }
     await this.port.save({...journal, phase: "closing"});
     if (this.composing || this.pausedReason) return;
     await this.port.render(block, html, journal.originalStyle);
