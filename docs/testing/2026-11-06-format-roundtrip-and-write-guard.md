@@ -26,6 +26,6 @@ API 근거: [Word Range.Text](https://learn.microsoft.com/en-us/office/vba/api/w
 - 실제 Word 서식 왕복 5회: `test-docs/word-host/20261106-212647-21ee95/format-summary.json`. 굵게·기울임·취소선·목록·한글/영문 조각이 동일한 마크다운으로 유지됐다.
 - 실제 Word 전체 회귀: `test-docs/word-host/20261106-213346-d502df/report.md`. 보존·반복 적용·실패 경로·대형 문서·수식 모드·서식 왕복·본문 전환·복구/실행 취소/재열기 통과. 초기 실패에서는 옛 feasibility probe가 문단 끝 커서를 이탈로 판단해 즉시 렌더링하던 경계 분류를 바로잡았다.
 - 네이티브 가드: `test-docs/word-host/20261106-213444-145e19/guard-summary.json`. 원문 충돌, 서식 충돌, ID 충돌, 다른 실행 epoch, 오래된 관찰 순번, 여러 줄, 변경 추적 활성, 입력 포커스 불명에서 거부하고 소스를 유지했다. idle에서는 `Alpha **guarded source** tail`로 한 번 교체됐다. MSVC `/W4 /WX` 빌드 통과.
-- 실제 한글 조합 도중 쓰기 거부 시험은 키 입력 가능 시간 응답을 기다리는 중이다. 검증된 idle/충돌/unknown 결과와 구분한다. 시험 코드는 `--body-input-only --native-ime`에 추가했다.
+- 실제 한글 조합 도중 차단도 확인했다: `test-docs/word-host/20261106-214947-8a1833/input-summary.json`. 실제 R/K 입력 후 TSF 조합이 활성인 동안 준비된 교체 요청을 제출하자 결과 코드 1(조합 중 거부), `NativeGuardBlockedActive=true`였다. 이어서 나머지 키와 Space를 입력해 `가나다`가 유지되고, 수동 idle 없이 문단 이탈 후 렌더링·커서 상대 위치 4 보존·단절 게이트가 통과했다. active/unknown 중 선택 조회는 0회였다. 외부 IMM32의 `ActualCompositionVerified=false`는 기존 관찰 방법의 한계이며, 별도 TSF OnEndEdit 조합 이벤트와 네이티브 차단 결과로 검증했다.
 
 제품 메인 번들은 358.31 kB / gzip 116.80 kB, 변환기를 포함하는 Word 청크는 170.09 kB / gzip 68.11 kB다. 기존 사용자 문서는 수정하지 않았고 시험은 자체 문서에서 수행했다.
