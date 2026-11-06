@@ -14,6 +14,7 @@ $initialLogLength=if(Test-Path -LiteralPath $nativeImeLog){(Get-Item -LiteralPat
 $startInfo=New-Object Diagnostics.ProcessStartInfo
 $startInfo.FileName=$env:WORD_IME_BRIDGE_EXE
 $startInfo.Arguments=(@($handle.ToInt64(),$wordProcessId,('"'+$nativeImeLog+'"'),('"'+$nativeImeStop+'"'),$epoch,('"'+$doc.FullName+'"')) -join ' ')
+if($env:WORD_BODY_OWNERSHIP_MODE -eq '1'){$startInfo.Arguments+=' owners'}
 $startInfo.UseShellExecute=$false
 $startInfo.CreateNoWindow=$true
 $script:nativeImeBridge=[Diagnostics.Process]::Start($startInfo)

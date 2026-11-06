@@ -1,0 +1,10 @@
+let deadline=Date.now()+6000;
+while(Date.now()<deadline && (await selectionFlow.host.read('owned-a')).mode!=='rendered')await new Promise(r=>setTimeout(r,50));
+must((await selectionFlow.host.read('owned-a')).mode==='rendered','leaving an owned block renders it');
+must(await selectionFlow.host.selectedKey()===null,'unregistered paragraph is not adopted');
+must(await selectionFlow.ownership.claimSelected('owned-b')==='owned-b','second explicit enrollment');
+deadline=Date.now()+6000;
+while(Date.now()<deadline && (await selectionFlow.host.read('owned-b')).mode!=='source')await new Promise(r=>setTimeout(r,50));
+const second=await selectionFlow.host.read('owned-b');must(second.mode==='source','native event enters newly registered second block');
+must(selectionLive.errors.length===0,'native selection connection remains healthy');
+return {second,operations:selectionFlow.host.operations};

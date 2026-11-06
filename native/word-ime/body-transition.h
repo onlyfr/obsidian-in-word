@@ -99,7 +99,7 @@ inline std::wstring blockKey(const SourceWrite& request) {
     return key;
 }
 inline bool validTransition(const BodyTransition& request) {
-    return request.version == 1 && request.mode >= 1 && request.mode <= 3 && request.failAt >= 0 && request.failAt <= 3
+    return request.version == 1 && request.mode >= 1 && request.mode <= 4 && request.failAt >= 0 && request.failAt <= 3
         && validWrite(request.source, true) && !wcspbrk(request.source.replacement,L"\t\v\f") && terminated(request.style,256) && terminated(request.partId,128)
         && terminated(request.previousJournal,262144) && terminated(request.pendingJournal,262144)
         && terminated(request.completeJournal,262144) && terminated(request.renderXml,262144);

@@ -76,7 +76,8 @@ inline void invoke(const Dispatch& object, const wchar_t* method, VARIANT* args 
     VARIANT result = object.call(method, DISPATCH_METHOD, args, count); VariantClear(&result);
 }
 struct CheckedBody { Dispatch doc, control, range, selection; };
-inline CheckedBody checkedBody(HWND window, const wchar_t* documentPath, const SourceWrite& request, bool allowRendered = false) {
+using BodyIdentityCheck = void (*)(const Dispatch&, const Dispatch&, const SourceWrite&);
+inline CheckedBody checkedBody(HWND window, const wchar_t* documentPath, const SourceWrite& request, bool allowRendered = false, BodyIdentityCheck identity = nullptr) {
     if (!validWrite(request, allowRendered)) throw GuardFailure{6};
     GUITHREADINFO gui{sizeof(GUITHREADINFO)};
     if (!GetGUIThreadInfo(GetCurrentThreadId(), &gui) || GetAncestor(gui.hwndFocus, GA_ROOT) != GetAncestor(window, GA_ROOT)) throw GuardFailure{2};
@@ -91,6 +92,7 @@ inline CheckedBody checkedBody(HWND window, const wchar_t* documentPath, const S
     VARIANT index{}; index.vt = VT_I4; index.lVal = 1;
     Dispatch control = controls.child(L"Item", &index, 1);
     if (control.text(L"ID") != request.controlId || control.text(L"Tag") != request.tag) throw GuardFailure{4};
+    if(identity)identity(doc,control,request);
     Dispatch range = control.child(L"Range");
     if (allowRendered && !range.text(L"Text").empty() && range.text(L"Text").back() == L'\r') setNumber(range, L"End", range.number(L"End") - 1);
     if (range.number(L"StoryType") != 1 || range.child(L"Paragraphs").number(L"Count") != 1 || range.child(L"ListFormat").number(L"ListType") != 0 || range.child(L"Tables").number(L"Count")

@@ -1,0 +1,17 @@
+const {createNativeHarness}=await import('/scripts/word-host/native-runtime.ts');
+globalThis.selectionFlow=createNativeHarness(nativeBodyToken);
+globalThis.selectionSavedWordRun=Word.run;Word.run=()=>{throw new Error('Native selection flow must not use Office.js');};
+globalThis.selectionSavedAddHandler=Office.context.document.addHandlerAsync;Office.context.document.addHandlerAsync=()=>{throw new Error('Native selection flow must not subscribe to Office.js events');};
+const key=await selectionFlow.ownership.claimSelected('owned-a');
+must(key==='owned-a','first explicit native enrollment');
+const snapshot=await selectionFlow.host.read(key);must(snapshot.mode==='rendered' && snapshot.text==='First bold end.','claim preserves rendered paragraph');
+must(snapshot.selectionStart-snapshot.start===8,'claim preserves original caret');
+must(await selectionFlow.ownership.claimSelected('unused-key')===key,'registration is idempotent inside an owned block');
+globalThis.selectionLive=selectionFlow.connectSelection(snapshot.epoch);
+const deadline=Date.now()+6000;
+while(Date.now()<deadline && (await selectionFlow.host.read(key)).mode!=='source')await new Promise(r=>setTimeout(r,50));
+const source=await selectionFlow.host.read(key);
+must(selectionLive.errors.length===0,'native selection connection: '+selectionLive.errors.join(';'));
+must(source.mode==='source' && source.text==='First **bold** end.','initial native selection snapshot enters source automatically');
+must(selectionLive.signals.some(s=>s.selectionSupported),'native WindowSelectionChange subscription established');
+return {source,signals:selectionLive.signals,operations:selectionFlow.host.operations};
