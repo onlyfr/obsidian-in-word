@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
+    "test:word": "python scripts/word-host/run.py",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
