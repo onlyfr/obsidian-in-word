@@ -1,3 +1,4 @@
+import type {NativeRunFormat} from "./run-format";
 /** Host-independent, experimental single-block source editing. No UI, Word globals or storage assumptions. */
 export interface BodyBlock {
   key: string;
@@ -16,6 +17,7 @@ export interface BodyJournal {
   phase: "opening" | "editing" | "closing" | "closed";
   /** Native host reports the last durable step of an interrupted transition. */
   nativeStage?: "prepared" | "content" | "tagged";
+  nativeFormat?: NativeRunFormat;
 }
 export interface BodyCommit {
   mode: "source" | "rendered";
@@ -121,7 +123,7 @@ export class BodyEditSession {
   async resume(): Promise<void> {
     if (this.running) throw new Error("진행 중인 편집이 끝난 뒤 다시 시작하세요");
     if (this.activeKey && (await this.port.read(this.activeKey))?.mode === "source")
-      throw new Error("현재 소스 문단을 먼저 복구하세요");
+      throw new Error("소스 표지가 남아 있어 자동 편집을 다시 시작할 수 없습니다. Word의 Ctrl+Z / Ctrl+Y로 문서 상태를 확인하세요");
     this.activeKey = null;
     this.pausedReason = null;
     this.generation++;
@@ -163,10 +165,10 @@ export class BodyEditSession {
   private async enter(key: string, generation: number): Promise<void> {
     const block = await this.port.read(key);
     if (!block) throw new Error("선택한 문단을 찾을 수 없습니다");
-    if (block.mode !== "rendered") throw new Error("이전에 중단된 소스 문단입니다. 먼저 복구하세요");
+    if (block.mode !== "rendered") throw new Error("중단되었거나 실행 취소된 문단의 상태가 불확실해 자동 전환을 멈췄습니다. Word의 Ctrl+Z / Ctrl+Y로 문서를 확인하세요");
     const previous = (await this.port.journals()).find(j => j.key === key);
     if (previous && previous.phase !== "closed" && !(previous.phase === "opening" && block.revision === previous.originalRevision))
-      throw new Error("중단된 전환 기록이 있습니다. 먼저 복구하세요");
+      throw new Error("중단된 전환 기록이 있어 자동 편집을 시작할 수 없습니다. Word의 Ctrl+Z / Ctrl+Y로 문서를 확인하세요");
     const markdown = this.codec.markdown(block.html);
     this.codec.html(markdown); // Validate before journaling or touching the block.
     if (generation !== this.generation || this.composing || this.pausedReason) return;

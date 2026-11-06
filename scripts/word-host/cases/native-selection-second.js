@@ -5,6 +5,6 @@ must(await selectionFlow.host.selectedKey()===null,'unregistered paragraph is no
 must(await selectionFlow.ownership.claimSelected('owned-b')==='owned-b','second explicit enrollment');
 deadline=Date.now()+6000;
 while(Date.now()<deadline && (await selectionFlow.host.read('owned-b')).mode!=='source')await new Promise(r=>setTimeout(r,50));
-const second=await selectionFlow.host.read('owned-b');must(second.mode==='source','native event enters newly registered second block');
+const second=await selectionFlow.host.read('owned-b');must(second.mode==='source','native event enters newly registered second block: '+JSON.stringify({errors:selectionLive.errors,paused:selectionFlow.session.pausedReason,signals:selectionLive.signals.slice(-5)}));
 must(selectionLive.errors.length===0,'native selection connection remains healthy');
 return {second,operations:selectionFlow.host.operations};

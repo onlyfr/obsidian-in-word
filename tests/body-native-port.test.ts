@@ -1,5 +1,5 @@
 import {expect,it} from "vitest";
-import {NativeBodyPort,nativeBodyBlock,nativeParagraph,type NativeBodyHost,type NativeBodySnapshot,type NativeTransition} from "../src/body/native-port";
+import {NativeBodyPort,NativeOutcomeUnknown,nativeBodyBlock,nativeParagraph,type NativeBodyHost,type NativeBodySnapshot,type NativeTransition} from "../src/body/native-port";
 import {BodyEditSession,SelectionMoved,type BodyJournal} from "../src/body/session";
 import {inlineBodyCodec} from "../src/body/inline-codec";
 import {wrapPackage} from "../src/convert/equations";
@@ -95,4 +95,18 @@ it.each(['<br>','`<br>`'])('keeps literal HTML-looking text in native paragraph 
 it('can inspect unsupported source edits for explicit original recovery',()=>{
  const source=snapshot();source.mode='source';source.text='a\tb\vc';source.xml=wrapPackage('<w:p><w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>a</w:t><w:tab/><w:t>b</w:t><w:br/><w:t>c</w:t></w:r></w:p>');
  expect(nativeBodyBlock(source).text).toBe('a\tb\vc');
+});
+it('pauses and preserves durable typography after a committed source reply is lost without replaying entry',async()=>{
+ const host=new Host();host.current.xml=host.current.xml.replace('<w:b/>','<w:b/><w:color w:val="AA5500"/><w:sz w:val="25"/>');
+ const original=host.transition.bind(host);let lost=true;host.transition=async change=>{const result=await original(change);if(lost){lost=false;throw new TypeError('network lost after commit');}return result;};
+ const session=new BodyEditSession(new NativeBodyPort(host),inlineBodyCodec);
+ await expect(session.select('a')).rejects.toBeInstanceOf(NativeOutcomeUnknown);expect(host.calls).toHaveLength(1);expect(session.pausedReason).toBeTruthy();
+ expect(host.records[0].nativeFormat?.spans.some(s=>s.format.color==='AA5500' && s.format.size===25)).toBe(true);
+ await session.select(null);await session.composition(false);expect(host.calls).toHaveLength(1);expect(host.current.mode).toBe('source');
+});
+it('does not replay an applied render when its reply is lost',async()=>{
+ const host=new Host(),session=new BodyEditSession(new NativeBodyPort(host),inlineBodyCodec);await session.select('a');
+ const original=host.transition.bind(host);host.transition=async change=>{await original(change);throw new TypeError('lost reply');};
+ await expect(session.select(null)).rejects.toBeInstanceOf(NativeOutcomeUnknown);
+ const fresh=new BodyEditSession(new NativeBodyPort(host),inlineBodyCodec);expect(await fresh.pendingRecovery()).toEqual([]);expect(host.calls.map(c=>c.mode)).toEqual(['source','rendered']);
 });
