@@ -1,6 +1,7 @@
 /** Experimental Word adapter. Not imported by the production task pane. Native shells can replace this port. */
 import { normalizeOoxml } from "../convert/sidecar";
 import { SelectionMoved, type BodyBlock, type BodyJournal, type BodyPort } from "./session";
+import {sourceCaret} from "./caret-map";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 export const BODY_NAMESPACE = "urn:obsidian-in-word:body-edit:v1";
@@ -60,6 +61,18 @@ async function read(context: Word.RequestContext, control: Word.ContentControl):
 }
 
 export class WordBodyPort implements BodyPort {
+  async selectedKey(): Promise<string | null> {
+    return Word.run(async context => {
+      const controls = context.document.contentControls; controls.load("items/tag"); await context.sync();
+      const selected = context.document.getSelection();
+      const candidates = controls.items.filter(cc => !!parseTag(cc.tag)).map(cc => ({key: parseTag(cc.tag)!.key, relation: cc.getRange("Content").compareLocationWith(selected)}));
+      await context.sync();
+      const inside = candidates.filter(c => ["Contains", "ContainsStart", "ContainsEnd", "Equal"].includes(c.relation.value));
+      if (inside.length > 1) throw new Error("선택 영역에 본문 블록이 중복되어 전환을 중단했습니다");
+      return inside[0]?.key ?? null;
+    });
+  }
+
   async read(key: string): Promise<BodyBlock | null> {
     return Word.run(async context => { const control = await find(context, key); return control ? read(context, control) : null; });
   }
@@ -90,13 +103,22 @@ export class WordBodyPort implements BodyPort {
   }
 
   async source(expected: BodyBlock, markdown: string): Promise<void> {
+    if (!Office.context.requirements.isSetSupported("WordApiDesktop", "1.4"))
+      throw new Error("커서 보존 실험에는 WordApiDesktop 1.4가 필요합니다");
     return this.mutate(expected, async (context, control) => {
-      const location = control.getRange("Content").compareLocationWith(context.document.getSelection()); await context.sync();
+      const content = control.getRange("Content");
+      const selected = context.document.getSelection();
+      content.load("start,end"); selected.load("start,end");
+      const location = content.compareLocationWith(selected); await context.sync();
       if (!["Contains", "ContainsStart", "ContainsEnd", "Equal"].includes(location.value)) throw new SelectionMoved("커서가 다른 문단으로 이동했습니다");
+      const from = sourceCaret(markdown, expected.text, selected.start - content.start);
+      const to = sourceCaret(markdown, expected.text, selected.end - content.start);
       control.insertText(markdown, "Replace");
       control.tag = bodyTag(expected.key, "source");
-      control.getRange("Content").getRange("End").select();
       await context.sync();
+      const source = control.getRange("Content"); source.load("start,end"); await context.sync();
+      const start = source.start;
+      source.start = start + from; source.end = start + to; source.select(); await context.sync();
     });
   }
 

@@ -12,6 +12,7 @@ const completed = new Set();
 const server = await createServer({
   configFile: false,
   root: repo,
+  optimizeDeps: {include: ['@lezer/markdown']},
   server: {
     host: 'localhost', port: Number(process.env.WORD_HOST_PORT), strictPort: true,
     https: {key: fs.readFileSync(path.join(certs, 'localhost.key')), cert: fs.readFileSync(path.join(certs, 'localhost.crt'))},
