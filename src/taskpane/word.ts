@@ -57,7 +57,7 @@ async function saveSidecar(
   keep: Set<string>,
 ): Promise<void> {
   // The sidecar belongs to the whole document, not to the selection: never drop what other regions may still need
-  // (see retainSidecar); only long-unused entries and entries beyond the size cap go.
+  // (see retainSidecar). Neither age nor size proves that an original is unused.
   let xml = sidecarToXml(retainSidecar(sidecar, keep));
   if (xml !== loaded.before) {
     // Word gives the same table/float new rsids on every getOoxml: entries equal up to those keep the stored version.
@@ -243,6 +243,8 @@ export async function replaceSelectionWithMarkdown(
       renderWithSidecar(markdown, sidecar, tableSources);
 
     if (badTables.length) throw new Error(`표를 적용할 수 없어 중단했습니다: ${badTables[0]}`);
+    if (missing.length)
+      throw new Error(`복원할 수 없는 Word 객체: ${missing.join(", ")}. 적용을 중단했습니다. '선택 영역 → 마크다운'으로 다시 불러오세요`);
 
     // Safety net: never silently destroy a floating object.
     if (lost.length)
@@ -299,122 +301,118 @@ export async function replaceSelectionWithMarkdown(
     const endCmp = selection.getRange("End").compareLocationWith(last.getRange("End"));
     context.trackedObjects.add(prev);
     context.trackedObjects.add(next);
-    await context.sync();
-    const wholeParagraphs = startCmp.value === "Equal" && endCmp.value === "Equal";
-    const inserted = selection.insertHtml(html, Word.InsertLocation.replace);
-    inserted.paragraphs.load("items/text");
-    // Inline equations are marker words inside a paragraph: locate them (display ones are whole marker paragraphs).
-    const found = active.map((q) => (q.display ? undefined : inserted.search(q.marker, { matchCase: true })));
-    found.forEach((f) => f?.load("items"));
-    await context.sync();
+    try {
+      await context.sync();
+      const wholeParagraphs = startCmp.value === "Equal" && endCmp.value === "Equal";
+      const inserted = selection.insertHtml(html, Word.InsertLocation.replace);
+      inserted.paragraphs.load("items/text");
+      // Inline equations are marker words inside a paragraph: locate them (display ones are whole marker paragraphs).
+      const found = active.map((q) => (q.display ? undefined : inserted.search(q.marker, { matchCase: true })));
+      found.forEach((f) => f?.load("items"));
+      await context.sync();
 
-    // Everything below is one sync: every sync that changes the document is a separate Undo step.
-    const paras = inserted.paragraphs.items;
-    const ops: (() => void)[] = [];
-    // Operations that put a Word-only object back (floating objects, tables, equations/pictures). If one of them
-    // fails, the apply must fail: the retry loop below may only skip optional operations (style names, selection).
-    const required = new Set<() => void>();
-    const req = (op: () => void) => {
-      required.add(op);
-      ops.push(op);
-    };
-    // insertHtml may ignore class/mso-style-name (e.g. built-in Quote), so set styles explicitly by name.
-    const used = new Set<number>();
-    for (const spec of styled) {
-      const idx = paras.findIndex((p, i) => !used.has(i) && norm(p.text) === norm(spec.text));
-      if (idx < 0) continue;
-      used.add(idx);
-      ops.push(() => (paras[idx].style = spec.style));
-    }
-    // Floating objects: replace each marker paragraph with the object's original OOXML.
-    floats.forEach((f, n) => {
-      const idx = paras.findIndex((p) => p.text.trim() === f.marker);
-      if (idx < 0) throw new Error(`부동 개체 위치를 찾을 수 없습니다 (${f.marker})`);
-      req(() => paras[idx].insertOoxml(ooxml[n], Word.InsertLocation.replace));
-    });
-    // Tables: each replaces its marker paragraph (the original table, or one rebuilt from the markdown).
-    tables.forEach((t) => {
-      const idx = paras.findIndex((p) => p.text.trim() === t.marker);
-      if (idx < 0) throw new Error(`표 위치를 찾을 수 없습니다 (${t.marker})`);
-      const tp = wrapPackage(t.ooxml, t.rels);
-      req(() => paras[idx].insertOoxml(tp, Word.InsertLocation.replace));
-      // insertOoxml leaves the marker paragraph behind as an empty paragraph after the table. Drop it when ordinary
-      // text follows (a table needs some paragraph after it, and two tables need one between them: those stay).
-      const next = paras[idx + 1];
-      if (next && !/^OWB(?:TBL|EQ|FLOAT)\d/.test(next.text.trim())) ops.push(() => next.getPrevious().delete());
-    });
-    // Equations: display ones replace their marker paragraph, inline ones replace the marker word.
-    active.forEach((q, n) => {
-      const pic = pictures.get(q.marker);
-      const pkg = pic ? wrapPackage(pic.body, pic.rels, pic.parts) : equationPackage(q.omml);
-      if (q.display) {
-        const idx = paras.findIndex((p) => p.text.trim() === q.marker);
-        if (idx < 0) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
-        req(() => paras[idx].insertOoxml(pkg, Word.InsertLocation.replace));
-      } else {
-        const r = found[n]?.items[0];
-        if (!r) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
-        req(() => r.insertOoxml(pkg, Word.InsertLocation.replace));
+      // Required mutations run exactly once. Office batches can partially execute before rejecting a sync.
+      const paras = inserted.paragraphs.items;
+      const ops: (() => void)[] = [];
+      const styleOps: (() => void)[] = [];
+      // insertHtml may ignore class/mso-style-name (e.g. built-in Quote), so set styles explicitly by name.
+      const used = new Set<number>();
+      for (const spec of styled) {
+        const idx = paras.findIndex((p, i) => !used.has(i) && norm(p.text) === norm(spec.text));
+        if (idx < 0) continue;
+        used.add(idx);
+        styleOps.push(() => (paras[idx].style = spec.style));
       }
-    });
-    // Empty paragraphs (`<!-- word:blank -->` markers): the marker paragraphs become empty again.
-    for (const p of paras) if (p.text.trim() === BLANK_TOKEN) ops.push(() => p.clear());
-    // Leave the whole inserted region selected, so that applying again replaces the same region.
-    ops.push(() => {
-      if (!wholeParagraphs) return inserted.select(); // the selection began/ended inside a paragraph
-      const from = prev.isNullObject ? context.document.body.getRange("Start") : prev.getRange("After");
-      const to = next.isNullObject ? context.document.body.paragraphs.getLast().getRange("Whole") : next.getRange("Start");
-      from.expandTo(to).select();
-    });
-    const failedRequired: string[] = [];
-    if (ops.length) {
-      try {
-        ops.forEach((op) => op());
-        await context.sync();
-      } catch {
-        // an unknown style name fails the whole batch: retry one by one and skip the optional ones that fail
-        for (const op of ops) {
-          try {
-            op();
-            await context.sync();
-          } catch (e) {
-            if (required.has(op)) failedRequired.push((e as Error)?.message ?? String(e));
-            /* optional operation (style, selection): keep whatever insertHtml produced */
-          }
+      // Floating objects: replace each marker paragraph with the object's original OOXML.
+      floats.forEach((f, n) => {
+        const idx = paras.findIndex((p) => p.text.trim() === f.marker);
+        if (idx < 0) throw new Error(`부동 개체 위치를 찾을 수 없습니다 (${f.marker})`);
+        ops.push(() => paras[idx].insertOoxml(ooxml[n], Word.InsertLocation.replace));
+      });
+      // Tables: each replaces its marker paragraph (the original table, or one rebuilt from the markdown).
+      tables.forEach((t) => {
+        const idx = paras.findIndex((p) => p.text.trim() === t.marker);
+        if (idx < 0) throw new Error(`표 위치를 찾을 수 없습니다 (${t.marker})`);
+        const tp = wrapPackage(t.ooxml, t.rels);
+        ops.push(() => paras[idx].insertOoxml(tp, Word.InsertLocation.replace));
+        // insertOoxml leaves the marker paragraph behind as an empty paragraph after the table. Drop it when ordinary
+        // text follows (a table needs some paragraph after it, and two tables need one between them: those stay).
+        const next = paras[idx + 1];
+        if (next && !/^OWB(?:TBL|EQ|FLOAT)\d/.test(next.text.trim())) ops.push(() => next.getPrevious().delete());
+      });
+      // Equations: display ones replace their marker paragraph, inline ones replace the marker word.
+      active.forEach((q, n) => {
+        const pic = pictures.get(q.marker);
+        const pkg = pic ? wrapPackage(pic.body, pic.rels, pic.parts) : equationPackage(q.omml);
+        if (q.display) {
+          const idx = paras.findIndex((p) => p.text.trim() === q.marker);
+          if (idx < 0) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
+          ops.push(() => paras[idx].insertOoxml(pkg, Word.InsertLocation.replace));
+        } else {
+          const r = found[n]?.items[0];
+          if (!r) throw new Error(`수식 위치를 찾을 수 없습니다 (${q.marker})`);
+          ops.push(() => r.insertOoxml(pkg, Word.InsertLocation.replace));
+        }
+      });
+      // Empty paragraphs (`<!-- word:blank -->` markers): the marker paragraphs become empty again.
+      for (const p of paras) if (p.text.trim() === BLANK_TOKEN) ops.push(() => p.clear());
+      // Leave the whole inserted region selected, so that applying again replaces the same region.
+      ops.push(() => {
+        if (!wholeParagraphs) return inserted.select(); // the selection began/ended inside a paragraph
+        const from = prev.isNullObject ? context.document.body.getRange("Start") : prev.getRange("After");
+        const to = next.isNullObject ? context.document.body.paragraphs.getLast().getRange("Whole") : next.getRange("Start");
+        from.expandTo(to).select();
+      });
+      if (ops.length) {
+        try {
+          ops.forEach((op) => op());
+          await context.sync();
+        } catch (e) {
+          throw new Error(`문서 복원 중 오류가 발생해 적용을 중단했습니다: ${(e as Error)?.message ?? String(e)} (Ctrl+Z를 여러 번 눌러 되돌리세요)`);
         }
       }
-    }
 
-    // The retry above skips optional failures: make sure no marker was left behind as text and no object is missing.
-    const checks = leftoverChecks({
-      floats: floats.length,
-      equations: active.length,
-      tables: tables.length,
-      blanks: paras.some((p) => p.text.trim() === BLANK_TOKEN),
-    });
-    if (checks.length || failedRequired.length) {
-      const found = checks.map((c) => ({ c, r: context.document.body.search(c.prefix, { matchCase: true }) }));
-      found.forEach((f) => f.r.load("items"));
+      // Styles are optional, and isolated so an unknown name cannot interrupt object restoration. Never replay this
+      // batch either: styles before the failed action may already have been applied.
+      const styleNotes: string[] = [];
+      if (styleOps.length) {
+        try {
+          styleOps.forEach((op) => op());
+          await context.sync();
+        } catch {
+          styleNotes.push("일부 문단 스타일을 적용하지 못했습니다. Word에서 스타일을 확인하세요");
+        }
+      }
+      // Make sure no marker was left behind as text and no object is missing.
+      const checks = leftoverChecks({
+        floats: floats.length,
+        equations: active.length,
+        tables: tables.length,
+        blanks: paras.some((p) => p.text.trim() === BLANK_TOKEN),
+      });
+      if (checks.length) {
+        const found = checks.map((c) => ({ c, r: context.document.body.search(c.prefix, { matchCase: true }) }));
+        found.forEach((f) => f.r.load("items"));
+        await context.sync();
+        for (const { c, r } of found) if (r.items.length) throw new Error(`${c.label} ${r.items.length}개를 ${c.action} (Ctrl+Z를 여러 번 눌러 되돌리세요)`);
+      }
+
+      const after = context.document.getSelection();
+      after.paragraphs.load("items/text");
       await context.sync();
-      for (const { c, r } of found) if (r.items.length) throw new Error(`${c.label} ${r.items.length}개를 ${c.action} (Ctrl+Z를 여러 번 눌러 되돌리세요)`);
-      if (failedRequired.length)
-        throw new Error(`문서 개체 ${failedRequired.length}개를 삽입하지 못했습니다: ${failedRequired[0]} (Ctrl+Z를 여러 번 눌러 되돌리세요)`);
+      lastRegion = regionSignature(after.paragraphs.items.map((p) => p.text));
+
+      // Entries referenced by the applied markdown are marked as used; other regions' entries are left alone.
+      await saveSidecar(
+        context,
+        sidecar,
+        loaded,
+        new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]),
+      );
+      return { missing, notes: [...tableNotes, ...mathNotes, ...styleNotes] };
+    } finally {
+      prev.untrack();
+      next.untrack();
     }
-
-    const after = context.document.getSelection();
-    after.paragraphs.load("items/text");
-    await context.sync();
-    prev.untrack();
-    next.untrack();
-    lastRegion = regionSignature(after.paragraphs.items.map((p) => p.text));
-
-    // Entries referenced by the applied markdown are marked as used; other regions' entries are left alone.
-    await saveSidecar(
-      context,
-      sidecar,
-      loaded,
-      new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]),
-    );
-    return { missing, notes: [...tableNotes, ...mathNotes] };
   });
 }
