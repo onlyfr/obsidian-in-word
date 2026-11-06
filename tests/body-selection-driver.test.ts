@@ -49,3 +49,28 @@ it('does not fan out selection reads while an earlier read is pending',async()=>
  expect(target).toHaveBeenCalledTimes(2);release('stale');await vi.advanceTimersByTimeAsync(0);
  expect(session.select).toHaveBeenCalledExactlyOnceWith('a');expect(target).toHaveBeenCalledTimes(3);driver.dispose();
 });
+it('keeps a newer selection notified while a conversion outlasts the debounce',async()=>{
+ vi.useFakeTimers();const {driver,target,session}=setup();await driver.signal('idle');session.select.mockClear();
+ let finish!:()=>void;session.select.mockImplementationOnce(()=>new Promise(r=>{finish=r;}));
+ target.mockResolvedValueOnce('a').mockResolvedValueOnce('b');
+ driver.notify();await vi.advanceTimersByTimeAsync(100);
+ driver.notify();await vi.advanceTimersByTimeAsync(100);
+ finish();await vi.advanceTimersByTimeAsync(0);
+ expect(session.select.mock.calls.map(c=>c[0])).toEqual(['a','b']);driver.dispose();
+});
+it('keeps a selection notified while opening the input gate runs a transition',async()=>{
+ const {driver,session,target}=setup();let finish!:()=>void;
+ session.composition.mockImplementation(async active=>{if(!active)await new Promise<void>(r=>{finish=r;});});
+ target.mockResolvedValueOnce('a').mockResolvedValueOnce('b');
+ const work=driver.signal('idle');for(let i=0;i<8;i++)await Promise.resolve();
+ session.composition.mockResolvedValue();driver.notify();finish();await work;
+ expect(session.select.mock.calls.map(c=>c[0])).toEqual(['a','b']);expect(target).toHaveBeenCalledTimes(2);driver.dispose();
+});
+it('does not reopen the gate after composition starts during a pending transition',async()=>{
+ const {driver,session,target}=setup();let finish!:()=>void;
+ session.composition.mockImplementation(async active=>{if(!active)await new Promise<void>(r=>{finish=r;});});
+ const work=driver.signal('idle');for(let i=0;i<8;i++)await Promise.resolve();
+ await driver.signal('active');driver.notify();finish();await work;
+ expect(driver.state).toBe('active');expect(target).toHaveBeenCalledTimes(1);
+ expect(session.composition.mock.calls.filter(c=>!c[0])).toHaveLength(1);driver.dispose();
+});

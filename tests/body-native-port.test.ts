@@ -76,6 +76,12 @@ it('resolves character styles and honors a direct off override',()=>{
 it('does not accept a different block identity from the host',async()=>{
  const host=new Host();host.current.key='other';await expect(new NativeBodyPort(host).read('a')).rejects.toThrow('다른 문단');
 });
+it('refuses modified HTML on an otherwise unchanged native snapshot before dispatch',async()=>{
+ const host=new Host(),port=new NativeBodyPort(host),block=(await port.read('a'))!;
+ block.html='<p>Alpha <em>bold</em> tail</p>';
+ await expect(port.commit(block,{mode:'source',markdown:'Alpha _bold_ tail',style:block.style,journal:{version:1,key:'a',originalMarkdown:'Alpha _bold_ tail',originalStyle:block.style,originalRevision:block.revision,phase:'opening'}})).rejects.toThrow('스냅샷');
+ expect(host.calls).toHaveLength(0);
+});
 it('finds a prepared native record even if content has not changed',async()=>{
  const host=new Host(),port=new NativeBodyPort(host),block=(await port.read('a'))!;
  host.records=[{version:1,key:'a',originalMarkdown:'Alpha **bold** tail',originalStyle:'Normal',originalRevision:block.revision,phase:'opening',nativeStage:'prepared'}];
