@@ -1,4 +1,5 @@
 const {createNativeHarness}=await import('/scripts/word-host/native-runtime.ts');
+globalThis.must=(ok,message)=>{if(!ok)throw new Error('ASSERT: '+message);};
 globalThis.nativeFlow=createNativeHarness(nativeBodyToken);
 const snapshot=await nativeFlow.host.read('input-a');
 if(snapshot.epoch===nativeOldSnapshot.epoch || snapshot.id!==nativeOldSnapshot.id)throw new Error('Reopen did not preserve ID and replace observer epoch');
