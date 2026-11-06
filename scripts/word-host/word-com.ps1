@@ -3,10 +3,12 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $RunDirectory).Path
 $wordHarnessScripts = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'native-write.ps1')
+. (Join-Path $PSScriptRoot 'native-body.ps1')
 if(Get-Process WINWORD -ErrorAction SilentlyContinue) { throw 'Close Word before running native acceptance tests.' }
 $wordTestApp = New-Object -ComObject Word.Application
 $doc = $null
 $last = ''
+$lastNativeBody = ''
 function Invoke-WordSetup([scriptblock]$Action) {
  # Retry only idempotent startup/read operations when Word rejects COM while opening its task pane.
  # Document edits/undo and test commands are never replayed by this helper.
@@ -31,6 +33,18 @@ try {
  Invoke-WordSetup {$doc.Activate()}
  Write-Output ('WORD_READY ' + (Invoke-WordSetup {$wordTestApp.Version}))
  while ($true) {
+  $nativePath=Join-Path $root 'native-body-request.json'
+  if($env:WORD_BODY_NATIVE_MODE -eq '1' -and (Test-Path -LiteralPath $nativePath)){
+   $nativeJob=Get-Content -LiteralPath $nativePath -Raw -Encoding UTF8|ConvertFrom-Json
+   if($nativeJob.id -ne $lastNativeBody){
+    $lastNativeBody=$nativeJob.id
+    try{$nativeValue=Invoke-NativeBodyRequest $nativeJob;$nativeResult=@{id=$nativeJob.id;ok=$true;value=$nativeValue}}
+    catch{$nativeResult=@{id=$nativeJob.id;ok=$false;error=$_.Exception.Message}}
+    $temporary=Join-Path $root 'native-body-response.tmp'
+    $nativeResult|ConvertTo-Json -Depth 35 -Compress|Set-Content -LiteralPath $temporary -Encoding UTF8
+    Move-Item -LiteralPath $temporary -Destination (Join-Path $root 'native-body-response.json') -Force
+   }
+  }
   $path = Join-Path $root 'com-command.json'
   if (Test-Path -LiteralPath $path) {
    $job = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -46,7 +60,7 @@ try {
     if ($job.id -eq 'close') { break }
    }
   }
-  Start-Sleep -Milliseconds 250
+  if($env:WORD_BODY_NATIVE_MODE -eq '1'){Start-Sleep -Milliseconds 50}else{Start-Sleep -Milliseconds 250}
  }
 } finally {
  if($null -ne $nativeImeBridge){

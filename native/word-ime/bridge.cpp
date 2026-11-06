@@ -1,4 +1,4 @@
-// Development-only TSF observer. No text reads/writes, key suppression or add-in registration.
+// Development-only TSF observer and checked body transitions. No key suppression or add-in registration.
 #include <windows.h>
 #include <msctf.h>
 #include <wrl/client.h>
@@ -6,10 +6,11 @@
 #include <string>
 using Microsoft::WRL::ComPtr;
 #include "write-command.h"
+#include "body-transition.h"
 
 struct Config {
     HWND window; wchar_t output[1024], epoch[80], documentPath[1024]; volatile LONG stop, detached, sequence;
-    volatile LONG writeState, writeResult; ULONGLONG writeDeadline; SourceWrite write;
+    volatile LONG writeState, writeResult, writeKind; ULONGLONG writeDeadline; SourceWrite write; BodyTransition transition;
 };
 constexpr WPARAM marker = 0x4f574249;
 std::wstring mappingName(DWORD pid) { return L"Local\\OwbWordIme-" + std::to_wstring(pid); }
@@ -19,6 +20,8 @@ Config* config = nullptr;
 HANDLE mapping = nullptr;
 long sequence = 0;
 int lastState = -2;
+LONG observerDepth = 0;
+struct ObserverCall {ObserverCall(){++observerDepth;} ~ObserverCall(){--observerDepth;}};
 void publish(int state, HRESULT hr = S_OK, bool force = false, const char* cause = "refresh") {
     if (!config || (state == lastState && !force)) return;
     lastState = state;
@@ -49,6 +52,7 @@ public:
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
     ULONG STDMETHODCALLTYPE Release() override { auto n = InterlockedDecrement(&refs); if (!n) delete this; return n; }
     HRESULT start() {
+        ObserverCall call;
         HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&manager));
         if (SUCCEEDED(hr)) hr = manager.As(&managerSource);
         if (SUCCEEDED(hr)) hr = managerSource->AdviseSink(IID_ITfThreadMgrEventSink, static_cast<ITfThreadMgrEventSink*>(this), &managerCookie);
@@ -65,6 +69,7 @@ public:
         managerCookie = TF_INVALID_COOKIE; managerSource.Reset(); manager.Reset(); publish(-1);
     }
     void refresh(bool force = false) {
+        ObserverCall call;
         ComPtr<ITfDocumentMgr> doc; ComPtr<ITfContext> next;
         HRESULT hr = manager->GetFocus(&doc);
         if (SUCCEEDED(hr) && doc) hr = doc->GetTop(&next);
@@ -82,6 +87,7 @@ public:
         sample(force);
     }
     void sample(bool force = false, const char* cause = "refresh") {
+        ObserverCall call;
         HWND foreground = GetForegroundWindow();
         GUITHREADINFO gui{sizeof(GUITHREADINFO)};
         GetGUIThreadInfo(GetCurrentThreadId(), &gui);
@@ -124,6 +130,79 @@ void guardedSourceWrite() {
     InterlockedExchange(&config->writeResult, result);
     InterlockedExchange(&config->writeState, 3);
 }
+void requireIdle() {
+    if (GetTickCount64() > config->writeDeadline) throw GuardFailure{7};
+    observer->refresh();
+    if (lastState != 0) throw GuardFailure{lastState == 1 ? 1L : 2L};
+}
+void guardedBodyTransition() {
+    LONG result = 8;
+    try {
+        const auto& request = config->transition;
+        if (!validTransition(request)) throw GuardFailure{6};
+        const auto key = blockKey(request.source);
+        validateJournal(request.pendingJournal, key); validateJournal(request.completeJournal, key);
+        if (request.mode == 2) validateRender(request.renderXml);
+        const auto runs = request.mode == 2 ? renderRuns(request.renderXml) : std::vector<NativeRun>{};
+        std::wstring rendered; for (const auto& run : runs) rendered += run.text;
+        if (rendered.size() > 4000 || rendered.find_first_of(L"\r\n\t\v\f") != std::wstring::npos) throw GuardFailure{6};
+        requireIdle();
+        auto target = checkedBody(config->window, config->documentPath, request.source, true);
+        auto part = journalPart(target.doc, request, key);
+        if (target.selection.number(L"StoryType") != 1 || target.selection.number(L"Start") != request.selectionStart || target.selection.number(L"End") != request.selectionEnd) throw GuardFailure{10};
+        if (request.mode == 1 && (request.selectionStart < target.range.number(L"Start") || request.selectionEnd > target.range.number(L"End")
+            || request.caretStart < 0 || request.caretEnd < request.caretStart || request.caretEnd > static_cast<LONG>(wcslen(request.source.replacement)))) throw GuardFailure{10};
+        requireIdle();
+        if (request.source.expectedSequence != sequence) throw GuardFailure{3};
+        UndoScope undo(target.doc);
+        storeJournal(part,target.doc,request.pendingJournal);
+        if (request.failAt == 1) throw GuardFailure{9};
+        if (request.mode != 3) {
+            requireIdle();
+            if (request.mode == 1) setText(target.range,L"Text",request.source.replacement);
+            else setText(target.range,L"Text",rendered.c_str());
+            storeJournal(part,target.doc,stageJournal(request.pendingJournal,L"content"));
+            if (request.failAt == 2) throw GuardFailure{9};
+            requireIdle();
+            auto content = target.control.child(L"Range");
+            if (content.child(L"Paragraphs").number(L"Count") != 1) throw GuardFailure{6};
+            if (request.mode == 1) invoke(content.child(L"Font"),L"Reset");
+            else {
+                VARIANT index{}; index.vt = VT_I4; index.lVal = 1;
+                setText(content.child(L"Paragraphs").child(L"Item",&index,1),L"Style",request.style);
+                invoke(content.child(L"Font"),L"Reset");
+                LONG position = content.number(L"Start");
+                for (const auto& run : runs) {
+                    if (run.text.empty()) continue;
+                    auto segment = content.child(L"Duplicate");
+                    setNumber(segment,L"Start",position); position += static_cast<LONG>(run.text.size()); setNumber(segment,L"End",position);
+                    auto font = segment.child(L"Font");
+                    requireIdle(); setNumber(font,L"Bold",run.bold ? -1 : 0);
+                    requireIdle(); setNumber(font,L"Italic",run.italic ? -1 : 0);
+                    requireIdle(); setNumber(font,L"StrikeThrough",run.strike ? -1 : 0);
+                    if (run.code) {requireIdle();setText(font,L"Name",L"Consolas");}
+                }
+            }
+            const auto nextTag = L"owb-body:v1:" + key + (request.mode == 1 ? L":source" : L":rendered");
+            setText(target.control,L"Tag",nextTag.c_str());
+            storeJournal(part,target.doc,stageJournal(request.pendingJournal,L"tagged"));
+            if (request.failAt == 3) throw GuardFailure{9};
+            requireIdle();
+            if (request.mode == 1) {
+                auto selection = target.control.child(L"Range"); LONG start = selection.number(L"Start");
+                setNumber(selection,L"Start",start + request.caretStart); setNumber(selection,L"End",start + request.caretEnd); invoke(selection,L"Select");
+            } else invoke(target.selection,L"Select");
+        }
+        requireIdle(); storeJournal(part,target.doc,request.completeJournal);
+        result = 0;
+    } catch (const GuardFailure& failure) {
+        result = failure.result;
+        std::wofstream error(std::wstring(config->output) + L".errors", std::ios::app);
+        error << L"result=" << failure.result << L" hr=" << failure.hr << L" member=" << (failure.member ? failure.member : L"guard") << std::endl;
+    }
+      catch (...) { result = 8; }
+    InterlockedExchange(&config->writeResult,result); InterlockedExchange(&config->writeState,3);
+}
 extern "C" __declspec(dllexport) LRESULT CALLBACK ImeHook(int code, WPARAM wp, LPARAM lp) {
     if (code >= 0 && wp == PM_REMOVE) {
         auto message = reinterpret_cast<MSG*>(lp);
@@ -132,14 +211,25 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK ImeHook(int code, WPARAM wp, L
                 mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, mappingName(GetCurrentProcessId()).c_str());
                 if (mapping) config = static_cast<Config*>(MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Config)));
                 if (config) {
+                    if (config->stop) {
+                        InterlockedExchange(&config->detached,1); UnmapViewOfFile(config); CloseHandle(mapping); config=nullptr; mapping=nullptr;
+                        return CallNextHookEx(nullptr,code,wp,lp);
+                    }
                     // Keep callback code valid even if shutdown cannot unadvise a busy host. Unloaded when this Word exits.
                     HMODULE module; GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&ImeHook), &module);
                     observer = new Observer(); observer->start();
                 }
             }
             if (config && observer) {
-                if (config->stop) { observer->stop(); observer->Release(); observer = nullptr; InterlockedExchange(&config->detached, 1); }
-                else if (InterlockedCompareExchange(&config->writeState, 2, 1) == 1) guardedSourceWrite();
+                if (config->stop) {
+                    // A COM call can pump messages. Do not release callback state under an executing write.
+                    if (config->writeState != 2 && observerDepth == 0) {
+                        observer->stop(); observer->Release(); observer = nullptr;
+                        InterlockedExchange(&config->detached, 1);
+                        UnmapViewOfFile(config); CloseHandle(mapping); config = nullptr; mapping = nullptr; sequence = 0; lastState = -2;
+                    }
+                }
+                else if (InterlockedCompareExchange(&config->writeState, 2, 1) == 1) { if (config->writeKind == 1) guardedBodyTransition(); else guardedSourceWrite(); }
                 else observer->refresh(true); // bootstrap, focus change or one-second health snapshot; edits use OnEndEdit.
             }
         }
@@ -150,18 +240,20 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK ImeHook(int code, WPARAM wp, L
 HWND targetWindow = nullptr;
 void CALLBACK foregroundChanged(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) { PostMessageW(targetWindow, WM_NULL, marker, 0); }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 5 && wcscmp(argv[1], L"--write-source") == 0) {
+    if (argc == 5 && (wcscmp(argv[1], L"--write-source") == 0 || wcscmp(argv[1], L"--body-transition") == 0)) {
+        const bool transition = wcscmp(argv[1], L"--body-transition") == 0;
         DWORD pid = wcstoul(argv[2], nullptr, 10);
         HANDLE shared = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, mappingName(pid).c_str()); if (!shared) return 20;
         auto config = static_cast<Config*>(MapViewOfFile(shared, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Config)));
         if (!config || wcscmp(config->epoch, argv[3]) != 0 || config->stop) return 21;
-        SourceWrite request{}; std::ifstream input(argv[4], std::ios::binary);
-        input.read(reinterpret_cast<char*>(&request), sizeof(request));
-        if (input.gcount() != sizeof(request) || !validWrite(request)) return 22;
+        auto body = std::make_unique<BodyTransition>(); SourceWrite request{}; std::ifstream input(argv[4], std::ios::binary);
+        if (transition) { input.read(reinterpret_cast<char*>(body.get()), sizeof(BodyTransition)); if (input.gcount() != sizeof(BodyTransition) || !validTransition(*body)) return 22; }
+        else { input.read(reinterpret_cast<char*>(&request), sizeof(request)); if (input.gcount() != sizeof(request) || !validWrite(request)) return 22; }
         if (InterlockedCompareExchange(&config->writeState, -1, 0) != 0) return 23;
-        config->write = request;
-        if (!request.expectedSequence) config->write.expectedSequence = config->sequence;
-        config->writeDeadline = GetTickCount64() + 2000;
+        config->writeKind = transition ? 1 : 0;
+        if (transition) { config->transition = *body; if (!body->source.expectedSequence) config->transition.source.expectedSequence = config->sequence; }
+        else { config->write = request; if (!request.expectedSequence) config->write.expectedSequence = config->sequence; }
+        config->writeDeadline = GetTickCount64() + (transition ? 5000 : 2000);
         InterlockedExchange(&config->writeState, 1); PostMessageW(config->window, WM_NULL, marker, 0);
         while (config->writeState != 3 && GetTickCount64() < config->writeDeadline + 500) Sleep(10);
         if (config->writeState == 3) { LONG result = config->writeResult; InterlockedExchange(&config->writeState, 0); UnmapViewOfFile(config); CloseHandle(shared); return static_cast<int>(result); }
@@ -195,7 +287,7 @@ int wmain(int argc, wchar_t** argv) {
     HWINEVENTHOOK focusHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, foregroundChanged, 0, 0, WINEVENT_OUTOFCONTEXT);
     if (!focusHook) { UnhookWindowsHookEx(hook); return 10; }
     HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
-    ULONGLONG deadline = GetTickCount64() + 120000, nextHealth = 0;
+    ULONGLONG deadline = GetTickCount64() + 300000, nextHealth = 0;
     while (GetTickCount64() < deadline && IsWindow(targetWindow) && GetFileAttributesW(argv[4]) == INVALID_FILE_ATTRIBUTES) {
         if (process && WaitForSingleObject(process, 0) == WAIT_OBJECT_0) break;
         if (GetTickCount64() >= nextHealth) { PostMessageW(targetWindow, WM_NULL, marker, 0); nextHealth = GetTickCount64() + 1000; }
@@ -204,7 +296,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     InterlockedExchange(&config->stop, 1); PostMessageW(targetWindow, WM_NULL, marker, 0);
     auto cleanupDeadline = GetTickCount64() + 3000;
-    while (!config->detached && IsWindow(targetWindow) && GetTickCount64() < cleanupDeadline) Sleep(20);
+    while (!config->detached && IsWindow(targetWindow) && GetTickCount64() < cleanupDeadline) {PostMessageW(targetWindow,WM_NULL,marker,0);Sleep(20);}
     UnhookWinEvent(focusHook); UnhookWindowsHookEx(hook);
     if (process) CloseHandle(process);
     UnmapViewOfFile(config); CloseHandle(mapping); FreeLibrary(dll);

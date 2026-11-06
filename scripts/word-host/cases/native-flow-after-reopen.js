@@ -1,0 +1,14 @@
+const {createNativeHarness}=await import('/scripts/word-host/native-runtime.ts');
+globalThis.must=(ok,message)=>{if(!ok)throw new Error('ASSERT: '+message);};
+globalThis.nativeFlow=createNativeHarness(nativeBodyToken);
+const snapshot=await nativeFlow.host.read('input-a');
+if(snapshot.epoch===nativeOldSnapshot.epoch || snapshot.id!==nativeOldSnapshot.id)throw new Error('Reopen did not preserve ID and replace observer epoch');
+const stale=await nativeFlow.host.transition({expected:nativeOldSnapshot,mode:'journal',text:'',xml:'',style:'',caretStart:0,caretEnd:0,pending:'',complete:''});
+if(stale.code!==21)throw new Error('Previous observer snapshot was accepted after reattach');
+const pending=await nativeFlow.session.pendingRecovery();
+if(!pending.includes('input-a'))throw new Error('Fresh task pane did not find saved native recovery record');
+await nativeFlow.session.recover('input-a','current');
+const current=await nativeFlow.port.read('input-a'),records=await nativeFlow.port.journals();
+if(current.mode!=='rendered' || current.text!=='Alpha edited / more / strike tail' || records[0].phase!=='closed')throw new Error('Native recovery after actual reopen failed');
+globalThis.nativeFlow=createNativeHarness(nativeBodyToken);
+return {pending,current,records,staleObserverRejected:stale.code===21};

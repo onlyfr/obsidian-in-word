@@ -17,7 +17,7 @@ function New-NativeWritePacket($Control,[string]$Replacement,$ExpectedText=$null
  }finally{$writer.Dispose();$stream.Dispose()}
  return $path
 }
-function Invoke-NativeWritePacket([string]$Packet,[string]$Epoch=(Split-Path $root -Leaf),[switch]$KeepUnfocused) {
+function Invoke-NativeWritePacket([string]$Packet,[string]$Epoch=$nativeImeEpoch,[switch]$KeepUnfocused,[switch]$BodyTransition) {
  $handle=[IntPtr]$wordTestApp.ActiveWindow.Hwnd
  if(-not $KeepUnfocused){
   $doc.Activate();$wordTestApp.ActiveWindow.ActivePane.Activate()
@@ -28,9 +28,10 @@ function Invoke-NativeWritePacket([string]$Packet,[string]$Epoch=(Split-Path $ro
  $wordProcessId=[WordInputProbe]::ProcessId($handle)
  $start=New-Object Diagnostics.ProcessStartInfo
  $start.FileName=$env:WORD_IME_BRIDGE_EXE
- $start.Arguments='--write-source '+$wordProcessId+' '+$Epoch+' "'+$Packet+'"'
+ $operation=if($BodyTransition){'--body-transition'}else{'--write-source'}
+ $start.Arguments=$operation+' '+$wordProcessId+' '+$Epoch+' "'+$Packet+'"'
  $start.UseShellExecute=$false;$start.CreateNoWindow=$true
  $process=[Diagnostics.Process]::Start($start)
- if(-not $process.WaitForExit(5000)){throw 'Native source write outcome unknown; do not retry.'}
+ if(-not $process.WaitForExit(8000)){throw 'Native source write outcome unknown; do not retry.'}
  return $process.ExitCode
 }
