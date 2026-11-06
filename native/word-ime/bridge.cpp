@@ -160,6 +160,28 @@ void requireIdle() {
     observer->refresh();
     if (lastState != 0) throw GuardFailure{lastState == 1 ? 1L : 2L};
 }
+void applyNativeFont(const Dispatch& font,const NativeRun& run,bool marks=true){
+    if(marks){requireIdle();setNumber(font,L"Bold",run.bold ? -1 : 0);
+    requireIdle(); setNumber(font,L"Italic",run.italic ? -1 : 0);
+    requireIdle();setNumber(font,L"StrikeThrough",run.strike ? -1 : 0);}
+    if(!run.ascii.empty()){requireIdle();setText(font,L"NameAscii",run.ascii.c_str());}
+    if(!run.hAnsi.empty()){requireIdle();setText(font,L"NameOther",run.hAnsi.c_str());}
+    if(!run.eastAsia.empty()){requireIdle();setText(font,L"NameFarEast",run.eastAsia.c_str());}
+    if(!run.cs.empty()){requireIdle();setText(font,L"NameBi",run.cs.c_str());}
+    const auto putSize=[&](const wchar_t* property,LONG size){
+        if(!size)return;requireIdle();VARIANT value{};value.vt=VT_R8;value.dblVal=static_cast<double>(size)/2;
+        VARIANT resultValue=font.call(property,DISPATCH_PROPERTYPUT,&value,1);VariantClear(&resultValue);
+    };
+    putSize(L"Size",run.size);putSize(L"SizeBi",run.sizeCs);
+    if(!run.color.empty()){
+        LONG color=-16777216;
+        if(run.color!=L"auto"){
+            const auto rgb=wcstoul(run.color.c_str(),nullptr,16);
+            color=static_cast<LONG>(((rgb&0xff)<<16)|(rgb&0xff00)|((rgb>>16)&0xff));
+        }
+        requireIdle();setNumber(font,L"Color",color);
+    }
+}
 void guardedBodyTransition() {
     LONG result = 8;
     try {
@@ -196,6 +218,7 @@ void guardedBodyTransition() {
         validateJournal(request.pendingJournal, key); validateJournal(request.completeJournal, key);
         if (request.mode == 2) validateRender(request.renderXml);
         const auto runs = request.mode == 2 ? renderRuns(request.renderXml) : std::vector<NativeRun>{};
+        const auto paragraphRuns = request.mode == 2 ? renderRuns(request.renderXml,true) : std::vector<NativeRun>{};
         std::wstring rendered; for (const auto& run : runs) rendered += run.text;
         if (rendered.size() > 4000 || rendered.find_first_of(L"\r\n\t\v\f") != std::wstring::npos) throw GuardFailure{6};
         requireIdle();
@@ -229,10 +252,13 @@ void guardedBodyTransition() {
                     auto segment = content.child(L"Duplicate");
                     setNumber(segment,L"Start",position); position += static_cast<LONG>(run.text.size()); setNumber(segment,L"End",position);
                     auto font = segment.child(L"Font");
-                    requireIdle(); setNumber(font,L"Bold",run.bold ? -1 : 0);
-                    requireIdle(); setNumber(font,L"Italic",run.italic ? -1 : 0);
-                    requireIdle(); setNumber(font,L"StrikeThrough",run.strike ? -1 : 0);
-                    if (run.code) {requireIdle();setText(font,L"Name",L"Consolas");}
+                    applyNativeFont(font,run);
+                }
+                if(!paragraphRuns.empty()){
+                    auto mark=content.child(L"Paragraphs").child(L"Item",&index,1).child(L"Range").child(L"Duplicate");
+                    const auto end=mark.number(L"End");
+                    if(mark.text(L"Text").empty() || mark.text(L"Text").back()!=L'\r')throw GuardFailure{6};
+                    setNumber(mark,L"Start",end-1);applyNativeFont(mark.child(L"Font"),paragraphRuns[0],false);
                 }
             }
             const auto nextTag = L"owb-body:v1:" + key + (request.mode == 1 ? L":source" : L":rendered");

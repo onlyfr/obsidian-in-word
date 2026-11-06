@@ -21,11 +21,11 @@ it('never retries a failed or ambiguous enrollment',async()=>{
 });
 it('rejects foreign controls, invalid identities, and lossy formatting before enrollment',async()=>{
   const h=host();await expect(new NativeBodyOwnership(h).claimSelected('<bad>')).rejects.toThrow('ID');expect(h.selectedKey).not.toHaveBeenCalled();
-  for(const snapshot of [{...candidate(),id:'foreign'},candidate(wrapPackage('<w:p><w:r><w:rPr><w:color w:val="FF0000"/></w:rPr><w:t>red</w:t></w:r></w:p>')),candidate(wrapPackage('<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>center</w:t></w:r></w:p>'))]){
+  for(const snapshot of [{...candidate(),id:'foreign'},candidate(wrapPackage('<w:p><w:r><w:rPr><w:color w:val="FF0000" w:themeColor="accent1"/></w:rPr><w:t>red</w:t></w:r></w:p>')),candidate(wrapPackage('<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>center</w:t></w:r></w:p>'))]){
     const h=host();h.candidate.mockResolvedValue(snapshot);await expect(new NativeBodyOwnership(h).claimSelected('owned-a')).rejects.toThrow();expect(h.claim).not.toHaveBeenCalled();
   }
 });
 it('accepts supported inline marks and rejects unsupported run formatting',()=>{
   expect(()=>validateNativeCandidate(candidate(nativeParagraph('**bold** _italic_ ~~strike~~ `code`')))).not.toThrow();
-  expect(()=>validateNativeCandidate(candidate(wrapPackage('<w:p><w:r><w:rPr><w:sz w:val="60"/></w:rPr><w:t>large</w:t></w:r></w:p>')))).toThrow();
+  expect(()=>validateNativeCandidate(candidate(wrapPackage('<w:p><w:r><w:rPr><w:sz w:val="60"/><w:color w:val="FF0000"/></w:rPr><w:t>large</w:t></w:r></w:p>')))).not.toThrow();
 });

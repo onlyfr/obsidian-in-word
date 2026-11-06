@@ -89,7 +89,7 @@ describe('experimental body editing sessions',()=>{
  it('preserves unsupported source for manual recovery and can explicitly restore the original',async()=>{
   const {port,session,select}=setup();await select('a');port.blocks.get('a')!.text='first\n\nsecond';
   await expect(select(null)).rejects.toThrow('일반 문단');expect(port.blocks.get('a')!.mode).toBe('source');
-  await expect(session.resume()).rejects.toThrow('먼저 복구');
+  await expect(session.resume()).rejects.toThrow('Ctrl+Z');
   await session.recover('a','original');expect(port.blocks.get('a')!.text).toBe('a bold');
  });
  it('does not retry a failed render and retains both current source and the original journal',async()=>{

@@ -2,6 +2,7 @@
 #include <msxml6.h>
 #include <memory>
 #include <set>
+#include <algorithm>
 
 struct BodyTransition {
     SourceWrite source;
@@ -36,7 +37,7 @@ inline void validateJournal(const wchar_t* xml, const std::wstring& key) {
 }
 inline void validateRender(const wchar_t* xml) {
     auto doc = parseXml(xml); StringArgument all(L"*"); ComPtr<IXMLDOMNodeList> elements; doc->getElementsByTagName(all.value.bstrVal, &elements);
-    static const std::set<std::wstring> word{L"document",L"body",L"p",L"r",L"rPr",L"b",L"i",L"strike",L"rFonts",L"t"};
+    static const std::set<std::wstring> word{L"document",L"body",L"p",L"pPr",L"r",L"rPr",L"b",L"i",L"strike",L"rFonts",L"sz",L"szCs",L"color",L"t"};
     static const std::set<std::wstring> package{L"package",L"part",L"xmlData"};
     long length = 0, paragraphs = 0, parts = 0, relationships = 0, documents = 0, bodies = 0; elements->get_length(&length);
     for (long i = 0; i < length; ++i) {
@@ -65,14 +66,40 @@ inline void validateRender(const wchar_t* xml) {
     }
     if (paragraphs != 1 || parts != 2 || relationships != 1 || documents != 1 || bodies != 1) throw GuardFailure{6};
 }
-struct NativeRun { std::wstring text; bool bold = false, italic = false, strike = false, code = false; };
-inline std::vector<NativeRun> renderRuns(const wchar_t* xml) {
+struct NativeRun {
+    std::wstring text,ascii,hAnsi,eastAsia,cs,color;
+    LONG size=0,sizeCs=0;
+    bool bold = false, italic = false, strike = false;
+};
+inline std::wstring renderValue(IXMLDOMNode* node,const wchar_t* key){
+    ComPtr<IXMLDOMElement> el;node->QueryInterface(IID_PPV_ARGS(&el));
+    if(!el)throw GuardFailure{6};StringArgument name(key);VARIANT raw{};el->getAttribute(name.value.bstrVal,&raw);
+    std::wstring value=raw.vt==VT_BSTR?raw.bstrVal:L"";VariantClear(&raw);return value;
+}
+inline void renderAttributes(IXMLDOMNode* node,const std::set<std::wstring>& allowed){
+    ComPtr<IXMLDOMNamedNodeMap> attributes;node->get_attributes(&attributes);long count=0;attributes->get_length(&count);
+    for(long i=0;i<count;++i){
+        ComPtr<IXMLDOMNode> attribute;attributes->get_item(i,&attribute);BSTR raw=nullptr;attribute->get_nodeName(&raw);
+        std::wstring name=raw?raw:L"";SysFreeString(raw);
+        if(!allowed.count(name))throw GuardFailure{6};
+    }
+}
+inline LONG renderSize(IXMLDOMNode* node){
+    renderAttributes(node,{L"w:val"});const auto val=renderValue(node,L"w:val");
+    if(val.empty() || val.size()>4 || val.find_first_not_of(L"0123456789")!=std::wstring::npos)throw GuardFailure{6};
+    const auto size=wcstol(val.c_str(),nullptr,10);if(size<1 || size>3276)throw GuardFailure{6};return size;
+}
+inline std::vector<NativeRun> renderRuns(const wchar_t* xml,bool paragraph=false) {
     auto doc = parseXml(xml); StringArgument all(L"*"); ComPtr<IXMLDOMNodeList> elements; doc->getElementsByTagName(all.value.bstrVal,&elements);
     std::vector<NativeRun> runs; long length = 0; elements->get_length(&length);
     for (long i = 0; i < length; ++i) {
         ComPtr<IXMLDOMNode> node; elements->get_item(i,&node); BSTR raw = nullptr; node->get_baseName(&raw);
         std::wstring name = raw ? raw : L""; SysFreeString(raw);
-        if (name != L"r") continue;
+        if(paragraph){
+            if(name!=L"rPr")continue;
+            ComPtr<IXMLDOMNode> parent;node->get_parentNode(&parent);parent->get_baseName(&raw);
+            name=raw?raw:L"";SysFreeString(raw);if(name!=L"pPr")continue;
+        }else if(name!=L"r")continue;
         NativeRun run;
         ComPtr<IXMLDOMNodeList> properties;
         StringArgument query(L".//*"); node->selectNodes(query.value.bstrVal,&properties); long count = 0; properties->get_length(&count);
@@ -84,9 +111,18 @@ inline std::vector<NativeRun> renderRuns(const wchar_t* xml) {
             if (name == L"i") run.italic = true;
             if (name == L"strike") run.strike = true;
             if (name == L"rFonts") {
-                ComPtr<IXMLDOMElement> element; prop.As(&element); StringArgument attr(L"w:ascii"); VARIANT value{}; element->getAttribute(attr.value.bstrVal,&value);
-                if (value.vt != VT_BSTR || wcscmp(value.bstrVal,L"Consolas") != 0) {VariantClear(&value);throw GuardFailure{6};}
-                VariantClear(&value); run.code = true;
+                renderAttributes(prop.Get(),{L"w:ascii",L"w:hAnsi",L"w:eastAsia",L"w:cs"});
+                run.ascii=renderValue(prop.Get(),L"w:ascii");run.hAnsi=renderValue(prop.Get(),L"w:hAnsi");
+                run.eastAsia=renderValue(prop.Get(),L"w:eastAsia");run.cs=renderValue(prop.Get(),L"w:cs");
+                for(const auto* font:{&run.ascii,&run.hAnsi,&run.eastAsia,&run.cs}){
+                    if(font->size()>128 || std::any_of(font->begin(),font->end(),[](wchar_t c){return c<32;}))throw GuardFailure{6};
+                }
+            }
+            if(name==L"sz")run.size=renderSize(prop.Get());
+            if(name==L"szCs")run.sizeCs=renderSize(prop.Get());
+            if(name==L"color"){
+                renderAttributes(prop.Get(),{L"w:val"});run.color=renderValue(prop.Get(),L"w:val");
+                if(run.color!=L"auto" && (run.color.size()!=6 || run.color.find_first_not_of(L"0123456789aAbBcCdDeEfF")!=std::wstring::npos))throw GuardFailure{6};
             }
         }
         runs.push_back(std::move(run));

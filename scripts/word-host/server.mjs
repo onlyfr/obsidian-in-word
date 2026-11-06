@@ -49,6 +49,8 @@ const server = await createServer({
               throw new Error('Native body outcome unknown; do not retry');
             });
             nativeQueue=work.then(()=>{},()=>{});const result=await work;
+            // Deterministic test-only reply loss: the worker has completed once; never replay it.
+            if(request.op==='transition' && request.dropReply===true){res.destroy();return;}
             res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(JSON.stringify(result));
           } catch(e) {res.writeHead(500,{'Content-Type':'text/plain'}).end(String(e));}
           return;

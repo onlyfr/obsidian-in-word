@@ -3,6 +3,7 @@ import {inlineToRuns} from "../convert/tables";
 import {wrapPackage} from "../convert/equations";
 import {inlineBodyCodec} from "./inline-codec";
 import {sourceCaret} from "./caret-map";
+import {captureRunFormat,applyRunFormat} from "./run-format";
 import {SelectionMoved, type BodyBlock, type BodyCommit, type BodyJournal, type BodyPort} from "./session";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -117,16 +118,18 @@ export class NativeBodyPort implements BodyPort {
   async commit(block: BodyBlock, change: BodyCommit): Promise<void> {
     const expected = this.snapshot(block);
     if (change.journal.key !== block.key) throw new Error("복구 기록의 문단 ID가 다릅니다");
-    const xml = nativeParagraph(change.markdown);
+    const journal={...change.journal};
+    if(change.mode==="source")journal.nativeFormat=captureRunFormat(expected.xml,expected.text);
+    const xml = change.mode==="rendered"?applyRunFormat(nativeParagraph(change.markdown),journal.nativeFormat):nativeParagraph(change.markdown);
     let from = 0, to = 0;
     if (change.mode === "source") {
       if (expected.selectionStart < expected.start || expected.selectionEnd > expected.start + block.text.length) throw new SelectionMoved("커서가 다른 문단으로 이동했습니다");
       from = sourceCaret(change.markdown,block.text,expected.selectionStart-expected.start);
       to = sourceCaret(change.markdown,block.text,expected.selectionEnd-expected.start);
     }
-    const complete = {...change.journal,phase:change.mode === "source" ? "editing" as const : "closed" as const};
+    const complete = {...journal,phase:change.mode === "source" ? "editing" as const : "closed" as const};
     await this.execute({expected,mode:change.mode,text:change.markdown,xml,style:change.style,caretStart:from,caretEnd:to,
-      pending:journalXml(change.journal,"prepared"),complete:journalXml(complete)});
+      pending:journalXml(journal,"prepared"),complete:journalXml(complete)});
   }
   private snapshot(block: BodyBlock): NativeBodySnapshot {
     const snapshot = this.snapshots.get(block); if (!snapshot) throw new Error("이 포트에서 새로 읽은 문단 스냅샷이 필요합니다");
@@ -134,8 +137,12 @@ export class NativeBodyPort implements BodyPort {
     return snapshot;
   }
   private async execute(change: NativeTransition): Promise<void> {
-    const {code} = await this.host.transition(change);
+    let code:number;
+    try{({code}=await this.host.transition(change));}
+    catch(cause){throw new NativeOutcomeUnknown("네이티브 요청의 결과를 확인할 수 없습니다. 자동 전환을 멈췄습니다. Word에서 Ctrl+Z를 여러 번 눌러 변경 전 상태로 되돌리세요",{cause});}
     if (code === 10) throw new SelectionMoved("커서가 다른 위치로 이동했습니다");
-    if (code !== 0) throw new Error(`네이티브 본문 전환 실패 (${code}). 자동 재시도 없이 복구 기록을 확인하세요`);
+    if(code===8 || code===24)throw new NativeOutcomeUnknown(`네이티브 요청의 결과가 불확실합니다 (${code}). 자동 전환을 멈췄습니다. Word에서 Ctrl+Z를 여러 번 눌러 변경 전 상태로 되돌리세요`);
+    if (code !== 0) throw new Error(`네이티브 본문 전환 실패 (${code}). 자동 전환을 멈췄습니다. 문서가 바뀌었다면 Word에서 Ctrl+Z로 되돌리세요`);
   }
 }
+export class NativeOutcomeUnknown extends Error {}

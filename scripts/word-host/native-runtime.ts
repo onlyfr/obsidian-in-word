@@ -6,8 +6,8 @@ import {BodySelectionDriver} from "../../src/body/selection-driver";
 import {NativeImeConnection} from "../../src/body/native-ime";
 
 export function createNativeHarness(token: string) {
-  const host: NativeBodyHost & NativeOwnershipHost & {failAt: number; operations: unknown[];selectionReads:number} = {
-    failAt: 0, operations: [],
+  const host: NativeBodyHost & NativeOwnershipHost & {failAt: number;dropReply:boolean; operations: unknown[];selectionReads:number} = {
+    failAt: 0,dropReply:false, operations: [],
     selectionReads:0,
     async selectedKey(){host.selectionReads++;return request({op:'selectedKey'});},
     async candidate(){return request({op:'candidate'});},
@@ -16,7 +16,8 @@ export function createNativeHarness(token: string) {
     async journals() {return request({op:"journals"});},
     async transition(change: NativeTransition) {
       host.operations.push({mode:change.mode,key:change.expected.key});
-      return request({op:"transition",change,failAt:host.failAt});
+      const dropReply=host.dropReply;host.dropReply=false;
+      return request({op:"transition",change,failAt:host.failAt,dropReply});
     },
   };
   async function request(job: unknown) {
