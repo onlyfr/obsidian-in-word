@@ -12,6 +12,6 @@ const deadline=Date.now()+6000;
 while(Date.now()<deadline && (await selectionFlow.host.read(key)).mode!=='source')await new Promise(r=>setTimeout(r,50));
 const source=await selectionFlow.host.read(key);
 must(selectionLive.errors.length===0,'native selection connection: '+selectionLive.errors.join(';'));
-must(source.mode==='source' && source.text==='First **bold** end.','initial native selection snapshot enters source automatically');
+must(source.mode==='source' && source.text==='First **bold** end.','initial native selection snapshot enters source automatically: '+JSON.stringify({mode:source.mode,text:source.text,active:selectionFlow.session.activeKey,paused:selectionFlow.session.pausedReason,driver:selectionLive.driver.state,operations:selectionFlow.host.operations,signals:selectionLive.signals.slice(-5)}));
 must(selectionLive.signals.some(s=>s.selectionSupported),'native WindowSelectionChange subscription established');
 return {source,signals:selectionLive.signals,operations:selectionFlow.host.operations};

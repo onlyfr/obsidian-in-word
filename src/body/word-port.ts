@@ -112,7 +112,7 @@ export class WordBodyPort implements BodyPort {
       const location = content.compareLocationWith(selected); await context.sync();
       if (!["Contains", "ContainsStart", "ContainsEnd", "Equal"].includes(location.value)) throw new SelectionMoved("커서가 다른 문단으로 이동했습니다");
       const from = sourceCaret(markdown, expected.text, selected.start - content.start);
-      const to = sourceCaret(markdown, expected.text, selected.end - content.start);
+      const to = selected.end===selected.start ? from : sourceCaret(markdown, expected.text, selected.end - content.start);
       control.insertText(markdown, "Replace");
       control.tag = bodyTag(expected.key, "source");
       await context.sync();

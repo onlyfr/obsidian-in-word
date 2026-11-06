@@ -100,12 +100,12 @@ function journalXml(journal: BodyJournal, stage?: string): string {
 
 /** Native transition port; the host transport is supplied by the shell, not tied to HTTP/npm/Office.js. */
 export class NativeBodyPort implements BodyPort {
-  private snapshots = new WeakMap<BodyBlock,NativeBodySnapshot>();
+  private snapshots = new WeakMap<BodyBlock,{native:NativeBodySnapshot;view:BodyBlock}>();
   constructor(private host: NativeBodyHost) {}
   async read(key: string): Promise<BodyBlock | null> {
     const snapshot = await this.host.read(key); if (!snapshot) return null;
     if (snapshot.key !== key) throw new Error("호스트가 다른 문단을 반환했습니다");
-    const block = nativeBodyBlock(snapshot); this.snapshots.set(block,{...snapshot}); return block;
+    const block = nativeBodyBlock(snapshot); this.snapshots.set(block,{native:{...snapshot},view:{...block}}); return block;
   }
   journals(): Promise<BodyJournal[]> { return this.host.journals(); }
   async save(journal: BodyJournal): Promise<void> {
@@ -125,16 +125,18 @@ export class NativeBodyPort implements BodyPort {
     if (change.mode === "source") {
       if (expected.selectionStart < expected.start || expected.selectionEnd > expected.start + block.text.length) throw new SelectionMoved("커서가 다른 문단으로 이동했습니다");
       from = sourceCaret(change.markdown,block.text,expected.selectionStart-expected.start);
-      to = sourceCaret(change.markdown,block.text,expected.selectionEnd-expected.start);
+      to = expected.selectionEnd===expected.selectionStart ? from : sourceCaret(change.markdown,block.text,expected.selectionEnd-expected.start);
     }
     const complete = {...journal,phase:change.mode === "source" ? "editing" as const : "closed" as const};
     await this.execute({expected,mode:change.mode,text:change.markdown,xml,style:change.style,caretStart:from,caretEnd:to,
       pending:journalXml(journal,"prepared"),complete:journalXml(complete)});
   }
   private snapshot(block: BodyBlock): NativeBodySnapshot {
-    const snapshot = this.snapshots.get(block); if (!snapshot) throw new Error("이 포트에서 새로 읽은 문단 스냅샷이 필요합니다");
-    if (nativeBodyBlock(snapshot).revision !== block.revision || snapshot.mode !== block.mode || snapshot.key !== block.key || snapshot.text !== block.text || snapshot.style !== block.style) throw new Error("문단 스냅샷이 변경됐습니다");
-    return snapshot;
+    const saved = this.snapshots.get(block); if (!saved) throw new Error("이 포트에서 새로 읽은 문단 스냅샷이 필요합니다");
+    // Strings are immutable: compare against the view validated at read time, including HTML.
+    // Re-parsing that same XML adds no freshness; the native boundary checks the live Word XML.
+    if ((Object.keys(saved.view) as (keyof BodyBlock)[]).some(key=>saved.view[key]!==block[key])) throw new Error("문단 스냅샷이 변경됐습니다");
+    return {...saved.native};
   }
   private async execute(change: NativeTransition): Promise<void> {
     let code:number;

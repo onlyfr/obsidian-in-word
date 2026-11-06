@@ -55,7 +55,10 @@ export class BodySelectionDriver {
         if (generation !== this.generation) continue;
         if (this.timer) { clearTimeout(this.timer); this.timer = null; }
         await this.session.composition(false);
-        return;
+        if (this.disposed || this.state !== "idle" || generation === this.generation) return;
+        // Opening the gate can itself run an asynchronous Word transition. Retain hints
+        // received during that transition instead of waiting for an unrelated next event.
+        await this.session.composition(true);
       }
     } catch (e) {
       this.state = "unknown";
@@ -75,7 +78,12 @@ export class BodySelectionDriver {
         const target = await this.target();
         if (this.disposed || this.state !== "idle" || this.releasing) return;
         if (generation !== this.generation) { generation = this.generation; continue; }
-        await this.session.select(target); return;
+        await this.session.select(target);
+        if (generation === this.generation) return;
+        // A debounce timer may already have fired and joined this in-flight sample.
+        // Drain its latest generation here; do not fan out another Word read.
+        generation = this.generation;
+        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
       }
     })().finally(() => { this.sampling = null; });
     return this.sampling;
