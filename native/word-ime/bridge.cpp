@@ -5,8 +5,12 @@
 #include <fstream>
 #include <string>
 using Microsoft::WRL::ComPtr;
+#include "write-command.h"
 
-struct Config { HWND window; wchar_t output[1024]; wchar_t epoch[80]; volatile LONG stop, detached; };
+struct Config {
+    HWND window; wchar_t output[1024], epoch[80], documentPath[1024]; volatile LONG stop, detached, sequence;
+    volatile LONG writeState, writeResult; ULONGLONG writeDeadline; SourceWrite write;
+};
 constexpr WPARAM marker = 0x4f574249;
 std::wstring mappingName(DWORD pid) { return L"Local\\OwbWordIme-" + std::to_wstring(pid); }
 
@@ -24,6 +28,7 @@ void publish(int state, HRESULT hr = S_OK, bool force = false, const char* cause
     file << "{\"epoch\":\"" << epoch << "\",\"seq\":" << ++sequence
          << ",\"state\":\"" << (state < 0 ? "unknown" : state ? "active" : "idle")
          << "\",\"hr\":" << hr << ",\"cause\":\"" << cause << "\"}" << std::endl;
+    InterlockedExchange(&config->sequence, sequence);
 }
 
 class Observer final : public ITfThreadMgrEventSink, public ITfTextEditSink {
@@ -99,6 +104,26 @@ public:
     HRESULT STDMETHODCALLTYPE OnUninitDocumentMgr(ITfDocumentMgr*) override { refresh(); return S_OK; }
 };
 Observer* observer = nullptr;
+void guardedSourceWrite() {
+    LONG result = 8;
+    try {
+        if (GetTickCount64() > config->writeDeadline) throw GuardFailure{7};
+        observer->refresh();
+        if (lastState != 0) throw GuardFailure{lastState == 1 ? 1L : 2L};
+        Dispatch range = checkedSourceRange(config->window, config->documentPath, config->write);
+        StringArgument replacement(config->write.replacement);
+        // Native boundary: resolve everything first, then check real TSF and the observation generation again.
+        observer->refresh();
+        if (lastState != 0) throw GuardFailure{lastState == 1 ? 1L : 2L};
+        if (config->write.expectedSequence != sequence) throw GuardFailure{3};
+        if (GetTickCount64() > config->writeDeadline) throw GuardFailure{7};
+        VARIANT value = range.call(L"Text", DISPATCH_PROPERTYPUT, &replacement.value, 1); VariantClear(&value);
+        result = 0;
+    } catch (const GuardFailure& failure) { result = failure.result; }
+      catch (...) { result = 8; }
+    InterlockedExchange(&config->writeResult, result);
+    InterlockedExchange(&config->writeState, 3);
+}
 extern "C" __declspec(dllexport) LRESULT CALLBACK ImeHook(int code, WPARAM wp, LPARAM lp) {
     if (code >= 0 && wp == PM_REMOVE) {
         auto message = reinterpret_cast<MSG*>(lp);
@@ -114,6 +139,7 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK ImeHook(int code, WPARAM wp, L
             }
             if (config && observer) {
                 if (config->stop) { observer->stop(); observer->Release(); observer = nullptr; InterlockedExchange(&config->detached, 1); }
+                else if (InterlockedCompareExchange(&config->writeState, 2, 1) == 1) guardedSourceWrite();
                 else observer->refresh(true); // bootstrap, focus change or one-second health snapshot; edits use OnEndEdit.
             }
         }
@@ -124,8 +150,26 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK ImeHook(int code, WPARAM wp, L
 HWND targetWindow = nullptr;
 void CALLBACK foregroundChanged(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) { PostMessageW(targetWindow, WM_NULL, marker, 0); }
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 5 && wcscmp(argv[1], L"--write-source") == 0) {
+        DWORD pid = wcstoul(argv[2], nullptr, 10);
+        HANDLE shared = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, mappingName(pid).c_str()); if (!shared) return 20;
+        auto config = static_cast<Config*>(MapViewOfFile(shared, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Config)));
+        if (!config || wcscmp(config->epoch, argv[3]) != 0 || config->stop) return 21;
+        SourceWrite request{}; std::ifstream input(argv[4], std::ios::binary);
+        input.read(reinterpret_cast<char*>(&request), sizeof(request));
+        if (input.gcount() != sizeof(request) || !validWrite(request)) return 22;
+        if (InterlockedCompareExchange(&config->writeState, -1, 0) != 0) return 23;
+        config->write = request;
+        if (!request.expectedSequence) config->write.expectedSequence = config->sequence;
+        config->writeDeadline = GetTickCount64() + 2000;
+        InterlockedExchange(&config->writeState, 1); PostMessageW(config->window, WM_NULL, marker, 0);
+        while (config->writeState != 3 && GetTickCount64() < config->writeDeadline + 500) Sleep(10);
+        if (config->writeState == 3) { LONG result = config->writeResult; InterlockedExchange(&config->writeState, 0); UnmapViewOfFile(config); CloseHandle(shared); return static_cast<int>(result); }
+        // Cancel only before execution. A running/indeterminate native mutation is never replayed.
+        InterlockedCompareExchange(&config->writeState, 0, 1); return 24;
+    }
     // Exact HWND, its PID, output, stop file, random run epoch.
-    if (argc != 6) return 2;
+    if (argc != 7) return 2;
     if (!*argv[5]) return 2;
     for (const wchar_t* p = argv[5]; *p; ++p) if (!((*p >= L'0' && *p <= L'9') || (*p >= L'a' && *p <= L'z') || *p == L'-')) return 2;
     targetWindow = reinterpret_cast<HWND>(_wcstoui64(argv[1], nullptr, 10));
@@ -139,6 +183,7 @@ int wmain(int argc, wchar_t** argv) {
     if (!config) return 6;
     config->window = targetWindow;
     if (wcscpy_s(config->output, argv[3]) || wcscpy_s(config->epoch, argv[5])) return 7;
+    if (wcscpy_s(config->documentPath, argv[6])) return 7;
     // DLL lives next to the executable; never search PATH or load an arbitrary command argument.
     wchar_t executable[MAX_PATH]; GetModuleFileNameW(nullptr, executable, MAX_PATH);
     std::wstring dllPath(executable); dllPath = dllPath.substr(0, dllPath.find_last_of(L"\\/") + 1) + L"word-ime-observer.dll";

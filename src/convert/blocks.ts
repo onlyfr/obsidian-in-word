@@ -1,4 +1,5 @@
 import type { Sidecar } from "./sidecar";
+import { normalizeInlineFormatting } from "./inline-format";
 
 /** Stable 8-hex-digit id (FNV-1a) so the same object always gets the same id. */
 export function hashId(s: string): string {
@@ -298,6 +299,7 @@ export function protectOpaque(
     }
   };
   walk(doc.body);
+  normalizeInlineFormatting(doc.body);
   return doc.body.innerHTML;
 }
 

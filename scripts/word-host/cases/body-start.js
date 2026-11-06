@@ -19,7 +19,7 @@ p.handler=()=>{
     const control=c.document.contentControls.getById(p.id);
     const selected=c.document.getSelection();
     const position=control.getRange('Content').compareLocationWith(selected);await c.sync();
-    const inside=['Contains','Equal','Inside'].includes(position.value);
+    const inside=['Contains','ContainsStart','ContainsEnd','Equal'].includes(position.value);
     if(inside && p.mode==='rendered'){
      const html=control.getRange('Content').getHtml();await c.sync();
      const markdown=obsidian.htmlToMarkdown(html.value,new sidecar.MemorySidecar());
