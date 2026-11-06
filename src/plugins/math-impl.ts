@@ -45,6 +45,39 @@ function cleanStyle(style: string): string {
     .join(";");
 }
 
+/**
+ * Build a MathML subtree without an HTML insertion sink. Re-check the inert parse even when the caller already
+ * sanitized it: only explicit MathML names/attributes are copied, and every output element has the MathML namespace.
+ * Used by the rasterizer when attaching MathML to the live document and serializing it into an SVG image.
+ */
+export function mathMLToElement(markup: string, target: Document = document): Element | null {
+  const ns = "http://www.w3.org/1998/Math/MathML";
+  const parsed = new DOMParser().parseFromString(`<body>${markup}</body>`, "text/html");
+  const root = parsed.body.querySelector("math");
+  if (!root || root.namespaceURI !== ns) return null;
+  const copy = (source: Element): Element => {
+    const out = target.createElementNS(ns, source.localName);
+    for (const attr of Array.from(source.attributes)) {
+      const name = attr.name.toLowerCase();
+      // XMLSerializer supplies namespace declarations itself. Never copy namespaced attributes or HTML handlers.
+      if (attr.namespaceURI || name === "xmlns" || !MATHML_ATTRS.has(name)) continue;
+      if (name === "style") {
+        const value = cleanStyle(attr.value);
+        if (value) out.setAttribute(name, value);
+      } else if (name !== "class" || /^[\w\- ]*$/.test(attr.value)) out.setAttribute(name, attr.value);
+    }
+    for (const child of Array.from(source.childNodes)) {
+      if (child.nodeType === 3) out.append(target.createTextNode(child.textContent ?? ""));
+      else if (child.nodeType === 1) {
+        const el = child as Element;
+        if (el.namespaceURI === ns && MATHML_TAGS.has(el.localName)) out.append(copy(el));
+      }
+    }
+    return out;
+  };
+  return copy(root);
+}
+
 /** Keep only MathML elements/attributes; drops scripts, event handlers, links, anything unknown. */
 export function sanitizeMathML(markup: string): string {
   const doc = new DOMParser().parseFromString(`<body>${markup}</body>`, "text/html");
