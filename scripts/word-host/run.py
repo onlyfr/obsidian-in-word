@@ -115,6 +115,7 @@ def main():
     parser.add_argument('--dev-settings-dir', type=Path, help='Path to installed office-addin-dev-settings package')
     parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
+    parser.add_argument('--body-input-only', action='store_true', help='Run caret/virtual-key/IME observability probes in an owned Word instance')
     args = parser.parse_args()
     if os.name != 'nt':
         raise SystemExit('Desktop Word acceptance tests require Windows.')
@@ -178,6 +179,24 @@ def main():
                 case('js','session-undo-recover','session-undo-recover.js')
                 case('com','session-delete','session-delete.ps1')
                 case('js','session-delete-check','session-delete-check.js')
+            if args.body_input_only:
+                case('js','setup','setup.js')
+                case('js','input-start','input-start.js')
+                case('com','input-place','input-place.ps1')
+                case('js','input-enter','input-enter.js')
+                case('js','input-watch','input-watch.js')
+                case('com','input-keys','input-keys.ps1')
+                case('js','input-check','input-check.js')
+                case('com','input-ime','input-ime.ps1')
+                case('js','input-finish','input-finish.js')
+                case('com','input-range-place','input-range-place.ps1')
+                case('js','input-range-check','input-range-check.js')
+                case('js','input-unicode-start','input-unicode-start.js')
+                case('com','input-unicode-place','input-unicode-place.ps1')
+                case('js','input-unicode-check','input-unicode-check.js')
+                (run/'input-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Input probes completed. Inspect IME observability separately: {run}',flush=True)
+                return
             if args.body_session_only:
                 case('js','setup','setup.js')
                 session_cases()
