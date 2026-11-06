@@ -5,12 +5,29 @@ if(Get-Process WINWORD -ErrorAction SilentlyContinue) { throw 'Close Word before
 $wordTestApp = New-Object -ComObject Word.Application
 $doc = $null
 $last = ''
+function Invoke-WordSetup([scriptblock]$Action) {
+ # Retry only idempotent startup/read operations when Word rejects COM while opening its task pane.
+ # Document edits/undo and test commands are never replayed by this helper.
+ for($attempt=0;$attempt -lt 30;$attempt++) {
+  try { return & $Action }
+  catch {
+   if($_.Exception.ToString() -notmatch '80010001|8001010A|RPC_E_CALL_REJECTED|RPC_E_SERVERCALL_RETRYLATER' -or $attempt -eq 29){throw}
+   Start-Sleep -Milliseconds 200
+  }
+ }
+}
 try {
- $wordTestApp.Visible = $true
- $wordTestApp.DisplayAlerts = 0
- $doc = $wordTestApp.Documents.Open((Join-Path $root 'acceptance.docx'))
- $doc.Activate()
- Write-Output ('WORD_READY ' + $wordTestApp.Version)
+ Invoke-WordSetup {$wordTestApp.Visible = $true}
+ Invoke-WordSetup {$wordTestApp.DisplayAlerts = 0}
+ $targetDocument=Join-Path $root 'acceptance.docx'
+ $doc = Invoke-WordSetup {
+  $existing=@($wordTestApp.Documents|Where-Object{$_.FullName -eq $targetDocument})
+  if($existing.Count -gt 1){throw 'Duplicate test documents during startup.'}
+  if($existing.Count -eq 1){return $existing[0]}
+  $wordTestApp.Documents.Open($targetDocument)
+ }
+ Invoke-WordSetup {$doc.Activate()}
+ Write-Output ('WORD_READY ' + (Invoke-WordSetup {$wordTestApp.Version}))
  while ($true) {
   $path = Join-Path $root 'com-command.json'
   if (Test-Path -LiteralPath $path) {
