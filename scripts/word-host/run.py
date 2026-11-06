@@ -116,7 +116,10 @@ def main():
     parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
     parser.add_argument('--body-input-only', action='store_true', help='Run caret/virtual-key/IME observability probes in an owned Word instance')
+    parser.add_argument('--native-ime', action='store_true', help='Build and attach the experimental x64 TSF observer (requires --body-input-only and Visual Studio C++/SDK)')
     args = parser.parse_args()
+    if args.native_ime and not args.body_input_only:
+        parser.error('--native-ime requires --body-input-only')
     if os.name != 'nt':
         raise SystemExit('Desktop Word acceptance tests require Windows.')
     if subprocess.run(['tasklist', '/FI', 'IMAGENAME eq WINWORD.EXE', '/NH'], capture_output=True).stdout.find(b'WINWORD.EXE') >= 0:
@@ -146,6 +149,10 @@ def main():
         (run / 'baseline-raster.ts').write_text(before, encoding='utf-8')
     manifest = run / 'manifest.xml'
     env = {**os.environ, 'WORD_HOST_RUN_DIR': str(run), 'WORD_HOST_PORT': str(port)}
+    if args.native_ime:
+        output = run / 'native'
+        subprocess.run(['powershell.exe', '-NoProfile', '-File', str(REPO / 'native/word-ime/build.ps1'), '-OutputDirectory', str(output)], check=True)
+        env['WORD_IME_BRIDGE_EXE'] = str(output / 'word-ime-bridge.exe')
     server = word = None
     registered = False
     results = []
@@ -159,7 +166,7 @@ def main():
                 if server.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError(f'HTTPS server failed; inspect {run / "server.log"}')
                 time.sleep(.25)
-            word = subprocess.Popen(['powershell.exe', '-NoProfile', '-STA', '-File', str(SCRIPTS / 'word-com.ps1'), '-RunDirectory', str(run)], stdout=word_log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
+            word = subprocess.Popen(['powershell.exe', '-NoProfile', '-STA', '-File', str(SCRIPTS / 'word-com.ps1'), '-RunDirectory', str(run)], env=env, stdout=word_log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
             wait_result(run, 'js', 'ready', 90, word)
             def case(kind, ident, file):
                 result = command(run, kind, ident, (SCRIPTS / 'cases' / file).read_text(encoding='utf-8-sig'), worker=word)
@@ -185,10 +192,16 @@ def main():
                 case('com','input-place','input-place.ps1')
                 case('js','input-enter','input-enter.js')
                 case('js','input-watch','input-watch.js')
+                if args.native_ime:
+                    case('com','native-ime-start','native-ime-start.ps1')
+                    results.append(command(run, 'js', 'native-ime-connect', 'globalThis.nativeEpoch=' + json.dumps(run.name) + ';' + (SCRIPTS / 'cases/native-ime-connect.js').read_text(encoding='utf-8'), worker=word))
                 case('com','input-keys','input-keys.ps1')
                 case('js','input-check','input-check.js')
                 case('com','input-ime','input-ime.ps1')
-                case('js','input-finish','input-finish.js')
+                if args.native_ime:
+                    case('js','native-ime-typed','native-ime-typed.js')
+                    case('com','native-ime-leave','native-ime-leave.ps1')
+                case('js','native-ime-finish' if args.native_ime else 'input-finish','native-ime-finish.js' if args.native_ime else 'input-finish.js')
                 case('com','input-range-place','input-range-place.ps1')
                 case('js','input-range-check','input-range-check.js')
                 case('js','input-unicode-start','input-unicode-start.js')

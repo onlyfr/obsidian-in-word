@@ -38,6 +38,7 @@ public static class WordInputProbe {
   return Array.ConvertAll(data,h=>h.ToInt64());
  }
  public static long Layout(IntPtr window) {uint pid;return GetKeyboardLayout(GetWindowThreadProcessId(window,out pid)).ToInt64();}
+ public static uint ProcessId(IntPtr window) {uint pid;GetWindowThreadProcessId(window,out pid);return pid;}
  public static void Focus(IntPtr window) {
   uint pid;uint target=GetWindowThreadProcessId(window,out pid);uint foreground=GetWindowThreadProcessId(GetForegroundWindow(),out pid);
   uint current=GetCurrentThreadId();bool attached=foreground!=current && AttachThreadInput(current,foreground,true);
