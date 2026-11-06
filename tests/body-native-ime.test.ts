@@ -44,3 +44,24 @@ it("closes and reports a rejected host transition", async () => {
   const {driver, frame, error} = setup(); driver.signal.mockRejectedValueOnce(new Error("host failed")); frame(1, "idle", true);
   await Promise.resolve(); await Promise.resolve(); expect(driver.signal).toHaveBeenLastCalledWith("unknown"); expect(error).toHaveBeenCalledTimes(1);
 });
+it("notifies only changed native selection revisions, after forwarding the input gate", () => {
+  vi.useFakeTimers();
+  const order:string[]=[],driver={signal:vi.fn(async(state:string)=>{order.push(state);})};
+  const connection=new NativeImeConnection(driver,"a",vi.fn(),100,()=>order.push("selection"));
+  const frame=(seq:number,selection:number,state="idle")=>connection.receive({epoch:"a",seq,state,snapshot:seq===1,selection,selectionSupported:true});
+  frame(1,0);frame(2,0);frame(3,1,"active");frame(4,1);
+  expect(order).toEqual(["idle","selection","idle","active","selection","idle"]);
+  connection.disconnect();
+});
+it("fails closed when native selection capability is absent or revisions regress", () => {
+  for(const invalid of [{selectionSupported:false,selection:0},{selectionSupported:true,selection:-1},{selectionSupported:true,selection:0.5}]){
+    const driver={signal:vi.fn(async()=>{})},notify=vi.fn(),error=vi.fn();
+    new NativeImeConnection(driver,"a",error,100,notify).receive({epoch:"a",seq:1,state:"idle",snapshot:true,...invalid});
+    expect(driver.signal).toHaveBeenCalledExactlyOnceWith("unknown");expect(notify).not.toHaveBeenCalled();expect(error).toHaveBeenCalledOnce();
+  }
+  const driver={signal:vi.fn(async()=>{})},error=vi.fn(),notify=vi.fn();
+  const connection=new NativeImeConnection(driver,"a",error,100,notify);
+  connection.receive({epoch:"a",seq:1,state:"idle",snapshot:true,selectionSupported:true,selection:2});
+  connection.receive({epoch:"a",seq:2,state:"idle",selectionSupported:true,selection:1});
+  expect(driver.signal).toHaveBeenLastCalledWith("unknown");expect(notify).toHaveBeenCalledOnce();expect(error).toHaveBeenCalledOnce();
+});

@@ -7,12 +7,15 @@
 using Microsoft::WRL::ComPtr;
 #include "write-command.h"
 #include "body-transition.h"
+#include "ownership.h"
+#include "selection-events.h"
 
 struct Config {
     HWND window; wchar_t output[1024], epoch[80], documentPath[1024]; volatile LONG stop, detached, sequence;
-    volatile LONG writeState, writeResult, writeKind; ULONGLONG writeDeadline; SourceWrite write; BodyTransition transition;
+    volatile LONG writeState, writeResult, writeKind, requireOwners; ULONGLONG writeDeadline; SourceWrite write; BodyTransition transition;
 };
 constexpr WPARAM marker = 0x4f574249;
+constexpr WPARAM selectionMarker = marker + 1;
 std::wstring mappingName(DWORD pid) { return L"Local\\OwbWordIme-" + std::to_wstring(pid); }
 
 #ifdef IME_OBSERVER_DLL
@@ -21,16 +24,27 @@ HANDLE mapping = nullptr;
 long sequence = 0;
 int lastState = -2;
 LONG observerDepth = 0;
+alignas(8) volatile LONG64 selectionRevision=0;
+LONG64 lastSelection=-1;
+volatile LONG selectionPending=0;
+bool selectionSupported=false,lastSelectionSupported=false;
 struct ObserverCall {ObserverCall(){++observerDepth;} ~ObserverCall(){--observerDepth;}};
+void selectionChanged(){
+    ObserverCall call;InterlockedIncrement64(&selectionRevision);
+    if(config && !config->stop && InterlockedExchange(&selectionPending,1)==0)PostMessageW(config->window,WM_NULL,selectionMarker,0);
+}
 void publish(int state, HRESULT hr = S_OK, bool force = false, const char* cause = "refresh") {
-    if (!config || (state == lastState && !force)) return;
+    if(!config)return;
+    const auto selected=config->writeState==2 && lastSelection>=0 ? lastSelection : selectionRevision;
+    if(state==lastState && selected==lastSelection && selectionSupported==lastSelectionSupported && !force)return;
     lastState = state;
+    lastSelection=selected;lastSelectionSupported=selectionSupported;
     std::ofstream file(config->output, std::ios::app);
     std::string epoch;
     for (const wchar_t* p = config->epoch; *p; ++p) epoch.push_back(static_cast<char>(*p));
     file << "{\"epoch\":\"" << epoch << "\",\"seq\":" << ++sequence
          << ",\"state\":\"" << (state < 0 ? "unknown" : state ? "active" : "idle")
-         << "\",\"hr\":" << hr << ",\"cause\":\"" << cause << "\"}" << std::endl;
+         << "\",\"hr\":" << hr << ",\"cause\":\"" << cause << "\",\"selection\":" << selected << ",\"selectionSupported\":" << (selectionSupported?"true":"false") << "}" << std::endl;
     InterlockedExchange(&config->sequence, sequence);
 }
 
@@ -40,6 +54,7 @@ class Observer final : public ITfThreadMgrEventSink, public ITfTextEditSink {
     ComPtr<ITfSource> managerSource, contextSource;
     ComPtr<ITfContext> context;
     DWORD managerCookie = TF_INVALID_COOKIE, contextCookie = TF_INVALID_COOKIE;
+    WordSelectionEvents* selectionEvents=nullptr;
 public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** result) override {
         if (!result) return E_POINTER;
@@ -56,7 +71,14 @@ public:
         HRESULT hr = CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&manager));
         if (SUCCEEDED(hr)) hr = manager.As(&managerSource);
         if (SUCCEEDED(hr)) hr = managerSource->AdviseSink(IID_ITfThreadMgrEventSink, static_cast<ITfThreadMgrEventSink*>(this), &managerCookie);
-        if (SUCCEEDED(hr)) refresh(); else publish(-1, hr);
+        if(SUCCEEDED(hr)){
+            try{
+                auto application=currentNativeView(config->window).child(L"Document").child(L"Application");
+                selectionEvents=new WordSelectionEvents(selectionChanged);
+                selectionSupported=SUCCEEDED(selectionEvents->attach(application));
+            }catch(...){selectionSupported=false;}
+            refresh();
+        }else publish(-1,hr);
         return hr;
     }
     void detachContext() {
@@ -64,6 +86,8 @@ public:
         contextCookie = TF_INVALID_COOKIE; contextSource.Reset(); context.Reset();
     }
     void stop() {
+        if(selectionEvents){selectionEvents->detach();selectionEvents->Release();selectionEvents=nullptr;}
+        selectionSupported=false;
         detachContext();
         if (managerSource && managerCookie != TF_INVALID_COOKIE) managerSource->UnadviseSink(managerCookie);
         managerCookie = TF_INVALID_COOKIE; managerSource.Reset(); manager.Reset(); publish(-1);
@@ -116,7 +140,7 @@ void guardedSourceWrite() {
         if (GetTickCount64() > config->writeDeadline) throw GuardFailure{7};
         observer->refresh();
         if (lastState != 0) throw GuardFailure{lastState == 1 ? 1L : 2L};
-        Dispatch range = checkedSourceRange(config->window, config->documentPath, config->write);
+        Dispatch range = checkedBody(config->window, config->documentPath, config->write, false, config->requireOwners?verifyOwnedRequest:nullptr).range;
         StringArgument replacement(config->write.replacement);
         // Native boundary: resolve everything first, then check real TSF and the observation generation again.
         observer->refresh();
@@ -129,6 +153,7 @@ void guardedSourceWrite() {
       catch (...) { result = 8; }
     InterlockedExchange(&config->writeResult, result);
     InterlockedExchange(&config->writeState, 3);
+    PostMessageW(config->window,WM_NULL,selectionMarker,0);
 }
 void requireIdle() {
     if (GetTickCount64() > config->writeDeadline) throw GuardFailure{7};
@@ -141,13 +166,40 @@ void guardedBodyTransition() {
         const auto& request = config->transition;
         if (!validTransition(request)) throw GuardFailure{6};
         const auto key = blockKey(request.source);
+        if(request.mode==4){
+            if(!config->requireOwners || request.failAt || *request.source.controlId || !*request.source.expected)throw GuardFailure{6};
+            requireIdle();auto view=currentNativeView(config->window);auto doc=view.child(L"Document");
+            if(_wcsicmp(doc.text(L"FullName").c_str(),config->documentPath)!=0)throw GuardFailure{4};
+            auto selection=view.child(L"Selection").child(L"Range").child(L"Duplicate");
+            if(selection.number(L"StoryType")!=1 || selection.number(L"Start")!=request.selectionStart || selection.number(L"End")!=request.selectionEnd || selection.child(L"Paragraphs").number(L"Count")!=1)throw GuardFailure{10};
+            VARIANT first{};first.vt=VT_I4;first.lVal=1;
+            auto range=selection.child(L"Paragraphs").child(L"Item",&first,1).child(L"Range").child(L"Duplicate");
+            auto enclosing=range.child(L"Duplicate");
+            const auto text=range.text(L"Text");if(!text.empty() && text.back()==L'\r')setNumber(range,L"End",range.number(L"End")-1);
+            validateClaimRange(doc,range,selection,request.source);
+            if(!registeredControlId(doc,key,false).empty())throw GuardFailure{12};
+            const auto from=request.selectionStart-range.number(L"Start"),to=request.selectionEnd-range.number(L"Start");
+            requireIdle();if(request.source.expectedSequence!=sequence)throw GuardFailure{3};
+            UndoScope undo(doc);
+            VARIANT args[2]{};args[0].vt=VT_DISPATCH;args[0].pdispVal=enclosing.object.Get();args[1].vt=VT_I4;args[1].lVal=0;
+            auto control=doc.child(L"ContentControls").child(L"Add",args,2);
+            requireIdle();setText(control,L"Tag",request.source.tag);setText(control,L"Title",L"Obsidian body");
+            const auto ownerXml=L"<bodyOwner xmlns=\""+std::wstring(ownerNamespace)+L"\" key=\""+key+L"\" controlId=\""+control.text(L"ID")+L"\"/>";
+            StringArgument xml(ownerXml.c_str());requireIdle();doc.child(L"CustomXMLParts").child(L"Add",&xml.value,1);
+            auto selected=control.child(L"Range");const auto start=selected.number(L"Start");
+            setNumber(selected,L"Start",start+from);setNumber(selected,L"End",start+to);requireIdle();invoke(selected,L"Select");
+            // Enrollment changes the selected ownership even when Word keeps the same caret
+            // and therefore emits no WindowSelectionChange event.
+            InterlockedIncrement64(&selectionRevision);
+            result=0;
+        }else{
         validateJournal(request.pendingJournal, key); validateJournal(request.completeJournal, key);
         if (request.mode == 2) validateRender(request.renderXml);
         const auto runs = request.mode == 2 ? renderRuns(request.renderXml) : std::vector<NativeRun>{};
         std::wstring rendered; for (const auto& run : runs) rendered += run.text;
         if (rendered.size() > 4000 || rendered.find_first_of(L"\r\n\t\v\f") != std::wstring::npos) throw GuardFailure{6};
         requireIdle();
-        auto target = checkedBody(config->window, config->documentPath, request.source, true);
+        auto target = checkedBody(config->window, config->documentPath, request.source, true, config->requireOwners?verifyOwnedRequest:nullptr);
         auto part = journalPart(target.doc, request, key);
         if (target.selection.number(L"StoryType") != 1 || target.selection.number(L"Start") != request.selectionStart || target.selection.number(L"End") != request.selectionEnd) throw GuardFailure{10};
         if (request.mode == 1 && (request.selectionStart < target.range.number(L"Start") || request.selectionEnd > target.range.number(L"End")
@@ -195,6 +247,7 @@ void guardedBodyTransition() {
         }
         requireIdle(); storeJournal(part,target.doc,request.completeJournal);
         result = 0;
+        }
     } catch (const GuardFailure& failure) {
         result = failure.result;
         std::wofstream error(std::wstring(config->output) + L".errors", std::ios::app);
@@ -202,11 +255,13 @@ void guardedBodyTransition() {
     }
       catch (...) { result = 8; }
     InterlockedExchange(&config->writeResult,result); InterlockedExchange(&config->writeState,3);
+    PostMessageW(config->window,WM_NULL,selectionMarker,0);
 }
 extern "C" __declspec(dllexport) LRESULT CALLBACK ImeHook(int code, WPARAM wp, LPARAM lp) {
     if (code >= 0 && wp == PM_REMOVE) {
         auto message = reinterpret_cast<MSG*>(lp);
-        if (message->message == WM_NULL && message->wParam == marker) {
+        if (message->message == WM_NULL && (message->wParam == marker || message->wParam == selectionMarker)) {
+            const bool selectionMessage=message->wParam==selectionMarker;if(selectionMessage)InterlockedExchange(&selectionPending,0);
             if (!config) {
                 mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, mappingName(GetCurrentProcessId()).c_str());
                 if (mapping) config = static_cast<Config*>(MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Config)));
@@ -226,10 +281,11 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK ImeHook(int code, WPARAM wp, L
                     if (config->writeState != 2 && observerDepth == 0) {
                         observer->stop(); observer->Release(); observer = nullptr;
                         InterlockedExchange(&config->detached, 1);
-                        UnmapViewOfFile(config); CloseHandle(mapping); config = nullptr; mapping = nullptr; sequence = 0; lastState = -2;
+                        UnmapViewOfFile(config); CloseHandle(mapping); config = nullptr; mapping = nullptr; sequence = 0; lastState = -2;selectionRevision=0;lastSelection=-1;lastSelectionSupported=false;selectionPending=0;
                     }
                 }
                 else if (InterlockedCompareExchange(&config->writeState, 2, 1) == 1) { if (config->writeKind == 1) guardedBodyTransition(); else guardedSourceWrite(); }
+                else if(selectionMessage)observer->sample(false,"selection");
                 else observer->refresh(true); // bootstrap, focus change or one-second health snapshot; edits use OnEndEdit.
             }
         }
@@ -261,7 +317,8 @@ int wmain(int argc, wchar_t** argv) {
         InterlockedCompareExchange(&config->writeState, 0, 1); return 24;
     }
     // Exact HWND, its PID, output, stop file, random run epoch.
-    if (argc != 7) return 2;
+    if (argc != 7 && argc != 8) return 2;
+    if(argc==8 && wcscmp(argv[7],L"owners")!=0)return 2;
     if (!*argv[5]) return 2;
     for (const wchar_t* p = argv[5]; *p; ++p) if (!((*p >= L'0' && *p <= L'9') || (*p >= L'a' && *p <= L'z') || *p == L'-')) return 2;
     targetWindow = reinterpret_cast<HWND>(_wcstoui64(argv[1], nullptr, 10));
@@ -274,6 +331,7 @@ int wmain(int argc, wchar_t** argv) {
     auto config = static_cast<Config*>(MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Config)));
     if (!config) return 6;
     config->window = targetWindow;
+    config->requireOwners=argc==8 ? 1 : 0;
     if (wcscpy_s(config->output, argv[3]) || wcscpy_s(config->epoch, argv[5])) return 7;
     if (wcscpy_s(config->documentPath, argv[6])) return 7;
     // DLL lives next to the executable; never search PATH or load an arbitrary command argument.

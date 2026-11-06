@@ -29,11 +29,18 @@ const server = await createServer({
               || req.headers.authorization !== `Bearer ${process.env.WORD_BODY_NATIVE_TOKEN}`) { res.writeHead(403).end(); return; }
           try {
             let body='';for await(const chunk of req){body+=chunk;if(body.length>2*1024*1024)throw new Error('Native request too large');}
-            const request=JSON.parse(body);if(!['read','journals','transition'].includes(request.op))throw new Error('Unsupported native operation');
+            const request=JSON.parse(body);if(!['read','journals','transition','selectedKey','candidate','claim'].includes(request.op))throw new Error('Unsupported native operation');
             const work=nativeQueue.then(async()=>{
               const id=randomUUID(), job={...request,id};
               const target=path.join(run,'native-body-request.json');
-              fs.writeFileSync(target+'.tmp',JSON.stringify(job));fs.renameSync(target+'.tmp',target);
+              fs.writeFileSync(target+'.tmp',JSON.stringify(job));
+              // Windows can briefly lock the previous request while the worker reads it.
+              // Retry publication only; a published/ambiguous native operation is never replayed.
+              const publishDeadline=Date.now()+500;
+              for(;;){try{fs.renameSync(target+'.tmp',target);break;}catch(error){
+                if(!['EPERM','EBUSY','EACCES'].includes(error.code) || Date.now()>=publishDeadline)throw error;
+                await new Promise(r=>setTimeout(r,20));
+              }}
               const response=path.join(run,'native-body-response.json'),deadline=Date.now()+12000;
               while(Date.now()<deadline){
                 if(fs.existsSync(response)){const result=JSON.parse(fs.readFileSync(response,'utf8').replace(/^\uFEFF/,''));if(result.id===id)return result;}

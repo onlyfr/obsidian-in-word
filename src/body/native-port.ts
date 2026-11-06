@@ -48,7 +48,8 @@ export function nativeBodyBlock(snapshot: NativeBodySnapshot): BodyBlock {
     const properties = child(style,"rPr");
     return [...styleProperties(base,seen),...(properties ? [properties] : [])];
   };
-  const paragraphProperties = styleProperties(child(child(p,"pPr"),"pStyle")?.getAttributeNS(W,"val") ?? "Normal");
+  const defaultStyle=Array.from(styles.values()).find(s=>s.getAttributeNS(W,"type")==="paragraph" && s.getAttributeNS(W,"default")==="1")?.getAttributeNS(W,"styleId") ?? "Normal";
+  const paragraphProperties = styleProperties(child(child(p,"pPr"),"pStyle")?.getAttributeNS(W,"val") ?? defaultStyle);
   const on = (properties: Element[], name: string) => {
     let value = false;
     for (const props of properties) {const el = child(props,name); if (el) value = !["0","false","off"].includes(el.getAttributeNS(W,"val") ?? "");}
