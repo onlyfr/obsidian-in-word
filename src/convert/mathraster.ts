@@ -8,7 +8,8 @@
  * Text colour policy: black (#000) on a transparent background, whatever the page colour is.
  *
  * Browser only (DOM + canvas). Never executes plugin/user code: LaTeX goes through the same Temml options and
- * MathML sanitizer as the preview (math-impl.ts). Throws {@link RasterError}.
+ * MathML sanitizer as the preview (math-impl.ts). Live layout and SVG use explicitly constructed DOM trees, with a
+ * second MathML allowlist check instead of reinserting HTML strings. Throws {@link RasterError}.
  */
 import { RasterError, type MathRasterizer, type RasterResult } from "./mathimg";
 
@@ -19,11 +20,9 @@ const SCALE = 3;
 const PAD = 3;
 
 const XHTML = "http://www.w3.org/1999/xhtml";
+const SVG = "http://www.w3.org/2000/svg";
 
-function mathElement(html: string, display: boolean): Element {
-  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
-  const math = doc.body.querySelector("math");
-  if (!math) throw new RasterError("unsupported", "no <math>");
+function mathElement(math: Element, display: boolean): Element {
   // Natural width (no `width:100%` block), but display-style sizing for display math.
   math.removeAttribute("display");
   math.classList.remove("tml-display");
@@ -43,29 +42,36 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 export async function createRasterizer(): Promise<MathRasterizer> {
-  const { mathRenderer } = await import("../plugins/math-impl");
+  const { mathRenderer, mathMLToElement } = await import("../plugins/math-impl");
   if (!(await mathRenderer.load())) throw new RasterError("unavailable", mathRenderer.error);
   return {
     async render(latex: string, display: boolean): Promise<RasterResult> {
       const r = mathRenderer.mathml(latex, display);
       if (r.html === undefined) throw new RasterError("unsupported", r.err);
-      const xml = new XMLSerializer().serializeToString(mathElement(r.html, display));
+      const parsed = mathMLToElement(r.html);
+      if (!parsed) throw new RasterError("unsupported", "no <math>");
+      const math = mathElement(parsed, display);
       const css = mathRenderer.css;
       const box = `font-size:${FONT_PX}px;line-height:normal;white-space:nowrap;color:#000;`;
       // A zero-size inline-block sits on the text baseline: it tells where the formula's baseline is.
-      const inner = `${xml}<span style="display:inline-block;width:0;height:0"></span>`;
+      const probeElement = document.createElement("span");
+      probeElement.style.cssText = "display:inline-block;width:0;height:0";
+      const wrap = document.createElement("div");
+      wrap.style.cssText = "position:absolute;left:0;top:0";
+      wrap.append(math, probeElement);
+      const styleElement = document.createElement("style");
+      styleElement.textContent = css;
 
       // 1. measure in the live document
       const host = document.createElement("div");
       host.style.cssText = `position:fixed;left:-20000px;top:0;visibility:hidden;${box}`;
-      host.innerHTML = `<style>${css}</style><div style="position:absolute;left:0;top:0">${inner}</div>`;
+      host.append(styleElement, wrap);
       document.body.append(host);
       let m: DOMRect, probe: DOMRect, origin: DOMRect;
       try {
-        const wrap = host.lastElementChild as HTMLElement;
         origin = wrap.getBoundingClientRect();
-        m = host.querySelector("math")!.getBoundingClientRect();
-        probe = (wrap.lastElementChild as HTMLElement).getBoundingClientRect();
+        m = math.getBoundingClientRect();
+        probe = probeElement.getBoundingClientRect();
       } finally {
         host.remove();
       }
@@ -78,12 +84,21 @@ export async function createRasterizer(): Promise<MathRasterizer> {
       // 2. the same markup inside a foreignObject, shifted so the formula starts at (PAD, PAD)
       const dx = PAD - (m.left - origin.left);
       const dy = PAD - (m.top - origin.top);
-      const svg =
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
-        `<foreignObject x="0" y="0" width="${w}" height="${h}"><div xmlns="${XHTML}" style="${box}">` +
-        `<style><![CDATA[${css}]]></style><div style="position:absolute;left:${dx}px;top:${dy}px">${inner}</div>` +
-        `</div></foreignObject></svg>`;
-      const img = await loadImage("data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg));
+      const svg = document.createElementNS(SVG, "svg");
+      svg.setAttribute("width", String(w));
+      svg.setAttribute("height", String(h));
+      const foreign = document.createElementNS(SVG, "foreignObject");
+      for (const [key, value] of Object.entries({ x: 0, y: 0, width: w, height: h })) foreign.setAttribute(key, String(value));
+      const content = document.createElementNS(XHTML, "div");
+      content.setAttribute("style", box);
+      const imageWrap = wrap.cloneNode(true) as HTMLElement;
+      imageWrap.style.left = `${dx}px`;
+      imageWrap.style.top = `${dy}px`;
+      content.append(styleElement.cloneNode(true), imageWrap);
+      foreign.append(content);
+      svg.append(foreign);
+      const xml = new XMLSerializer().serializeToString(svg);
+      const img = await loadImage("data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml));
 
       // 3. canvas -> PNG (SCALE x the CSS px size)
       const canvas = document.createElement("canvas");

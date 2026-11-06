@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -72,6 +73,7 @@ def summarize(directory, results):
         'unknownStyleNotes': by_id['style']['value']['result']['notes'],
         'undoSteps': undo,
         'retention': by_id['retention']['value'], 'large': large,
+        'raster': by_id['raster']['value'],
     }
     (directory / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     report = f'''# Native Word acceptance results
@@ -87,6 +89,7 @@ All cases passed. The runner used a fresh synthetic document and real Office.js 
 | Unknown style | Warning; restored objects retained; no retry |
 | Undo: normal with style / without style / failed apply | {undo['style']} / {undo['plain']} / {undo['fail']} steps; text and object counts restored |
 | 100-day-old long formula in another region | LaTeX retained; editable after reading region B |
+| Math raster corpus | {summary['raster']['count']} inline/display samples; baseline PNG comparison: {summary['raster']['compared']} |
 | Large synthetic document | {large['paragraphs']} Office.js paragraphs, 30 tables, 60 equations; 3 stable applies |
 
 Large load: {large['loadMs']/1000:.2f}s. Apply cycles: {', '.join(f"{c['ms']/1000:.2f}s" for c in large['cycles'])}.
@@ -102,6 +105,7 @@ Full machine-readable observations: `results.jsonl`, `com-results.jsonl`, `summa
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dev-settings-dir', type=Path, help='Path to installed office-addin-dev-settings package')
+    parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
     args = parser.parse_args()
     if os.name != 'nt':
         raise SystemExit('Desktop Word acceptance tests require Windows.')
@@ -124,6 +128,12 @@ def main():
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
     prepare(run, settings, port)
+    if args.compare_raster_ref:
+        if not re.fullmatch(r'[0-9a-fA-F]{7,40}', args.compare_raster_ref):
+            raise SystemExit('--compare-raster-ref must be a git commit hash')
+        before = subprocess.run(['git', 'show', args.compare_raster_ref + ':src/convert/mathraster.ts'], cwd=REPO, check=True, capture_output=True).stdout.decode('utf-8')
+        before = before.replace('from "./mathimg"', 'from "/src/convert/mathimg"').replace('import("../plugins/math-impl")', 'import("/src/plugins/math-impl")')
+        (run / 'baseline-raster.ts').write_text(before, encoding='utf-8')
     manifest = run / 'manifest.xml'
     env = {**os.environ, 'WORD_HOST_RUN_DIR': str(run), 'WORD_HOST_PORT': str(port)}
     server = word = None
@@ -161,6 +171,10 @@ def main():
             case('js', 'change-plain', 'change-no-style.js')
             case('com', 'undo-after-plain', 'undo-after.ps1')
             case('js', 'retention', 'retention.js')
+            if args.compare_raster_ref:
+                url = '/test-docs/word-host/' + run.name + '/baseline-raster.ts'
+                command(run, 'js', 'raster-reference', 'globalThis.rasterBaselineUrl=' + json.dumps(url) + '; return true;')
+            case('js', 'raster', 'raster.js')
             case('js', 'large', 'large.js')
             summarize(run, results)
             print(f'All Word acceptance cases passed. Report: {run / "report.md"}', flush=True)
