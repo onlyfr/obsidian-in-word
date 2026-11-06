@@ -15,7 +15,7 @@ SCRIPTS = Path(__file__).resolve().parent
 REPO = SCRIPTS.parent.parent
 
 
-def wait_result(directory, kind, ident, timeout=120):
+def wait_result(directory, kind, ident, timeout=120, worker=None):
     path = directory / ('com-results.jsonl' if kind == 'com' else 'results.jsonl')
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -27,16 +27,18 @@ def wait_result(directory, kind, ident, timeout=120):
                     continue  # The writer may be appending the last line.
                 if result.get('id') == ident:
                     return result
+        if worker is not None and worker.poll() is not None:
+            raise RuntimeError(f'Word helper exited with {worker.returncode}; inspect {directory / "word.log"}')
         time.sleep(.25)
     raise TimeoutError(f'No {kind} result for {ident} within {timeout}s; inspect {directory}')
 
 
-def command(directory, kind, ident, code, timeout=120):
+def command(directory, kind, ident, code, timeout=120, worker=None):
     target = directory / ('com-command.json' if kind == 'com' else 'command.json')
     temp = target.with_suffix('.tmp')
     temp.write_text(json.dumps({'id': ident, 'code': code}), encoding='utf-8')
     os.replace(temp, target)
-    result = wait_result(directory, kind, ident, timeout)
+    result = wait_result(directory, kind, ident, timeout, worker)
     print(f'{ident}: {"PASS" if result["ok"] else "FAIL"}', flush=True)
     if not result['ok']:
         raise RuntimeError(json.dumps(result, ensure_ascii=True))
@@ -76,6 +78,7 @@ def summarize(directory, results):
         'raster': by_id['raster']['value'],
         'mathOutput': by_id['math-output']['value'],
         'bodyProbe': by_id['body-finish']['value'],
+        'bodySession': {name:by_id[name]['value'] for name in ('session-lifecycle','session-after-reopen','session-undo-check','session-redo-check','session-undo-recover','session-delete-check')},
     }
     (directory / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     report = f'''# Native Word acceptance results
@@ -94,6 +97,7 @@ All cases passed. The runner used a fresh synthetic document and real Office.js 
 | Math raster corpus | {summary['raster']['count']} inline/display samples; baseline PNG comparison: {summary['raster']['compared']} |
 | Math output choice | hybrid -> all images -> hybrid; LaTeX and image bytes retained |
 | Body source feasibility | One ordinary paragraph enters source on selection and renders edited bold/italic on exit |
+| Body session lifecycle | Rapid moves, composition gate, partial-write recovery, actual document reopen, undo/redo and deletion guards |
 | Large synthetic document | {large['paragraphs']} Office.js paragraphs, 30 tables, 60 equations; 3 stable applies |
 
 Large load: {large['loadMs']/1000:.2f}s. Apply cycles: {', '.join(f"{c['ms']/1000:.2f}s" for c in large['cycles'])}.
@@ -110,6 +114,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dev-settings-dir', type=Path, help='Path to installed office-addin-dev-settings package')
     parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
+    parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
     args = parser.parse_args()
     if os.name != 'nt':
         raise SystemExit('Desktop Word acceptance tests require Windows.')
@@ -154,10 +159,31 @@ def main():
                     raise RuntimeError(f'HTTPS server failed; inspect {run / "server.log"}')
                 time.sleep(.25)
             word = subprocess.Popen(['powershell.exe', '-NoProfile', '-STA', '-File', str(SCRIPTS / 'word-com.ps1'), '-RunDirectory', str(run)], stdout=word_log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
-            wait_result(run, 'js', 'ready', 90)
+            wait_result(run, 'js', 'ready', 90, word)
             def case(kind, ident, file):
-                result = command(run, kind, ident, (SCRIPTS / 'cases' / file).read_text(encoding='utf-8-sig'))
+                result = command(run, kind, ident, (SCRIPTS / 'cases' / file).read_text(encoding='utf-8-sig'), worker=word)
                 results.append(result)
+            def session_cases():
+                case('js','session-start','session-start.js')
+                case('js','session-lifecycle','session-lifecycle.js')
+                case('com','session-reopen','session-reopen.ps1')
+                case('js','session-after-reopen','session-after-reopen.js')
+                case('com','session-undo-before','undo-before.ps1')
+                case('js','session-exit','session-exit.js')
+                case('com','session-undo','session-undo.ps1')
+                case('js','session-undo-check','session-undo-check.js')
+                case('com','session-redo','session-redo.ps1')
+                case('js','session-redo-check','session-redo-check.js')
+                case('com','session-undo-source','session-undo-source.ps1')
+                case('js','session-undo-recover','session-undo-recover.js')
+                case('com','session-delete','session-delete.ps1')
+                case('js','session-delete-check','session-delete-check.js')
+            if args.body_session_only:
+                case('js','setup','setup.js')
+                session_cases()
+                (run/'session-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Body session cases passed. Evidence: {run}',flush=True)
+                return
             case('js', 'setup', 'setup.js')
             case('com', 'add-float', 'add-float.ps1')
             case('js', 'repeat', 'repeat.js')
@@ -186,6 +212,7 @@ def main():
             case('js', 'body-source', 'body-source.js')
             case('com', 'body-edit-exit', 'body-edit-exit.ps1')
             case('js', 'body-finish', 'body-finish.js')
+            session_cases()
             summarize(run, results)
             print(f'All Word acceptance cases passed. Report: {run / "report.md"}', flush=True)
         finally:

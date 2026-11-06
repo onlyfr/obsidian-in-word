@@ -8,6 +8,7 @@ const run = process.env.WORD_HOST_RUN_DIR;
 if (!run) throw new Error('Use python scripts/word-host/run.py to start this test server');
 const {createServer} = await import(pathToFileURL(path.join(repo, 'node_modules/vite/dist/node/index.js')));
 const certs = path.join(os.homedir(), '.office-addin-dev-certs');
+const completed = new Set();
 const server = await createServer({
   configFile: false,
   root: repo,
@@ -24,7 +25,9 @@ const server = await createServer({
           res.setHeader('Content-Type', 'application/json');
           res.setHeader('Cache-Control', 'no-store');
           const command = path.join(run, 'command.json');
-          res.end(fs.existsSync(command) ? fs.readFileSync(command, 'utf8') : 'null');
+          const job = fs.existsSync(command) ? JSON.parse(fs.readFileSync(command, 'utf8')) : null;
+          // A task pane reopened with its document must not replay a previously completed mutation command.
+          res.end(job && !completed.has(job.id) ? JSON.stringify(job) : 'null');
           return;
         }
         if (req.url === '/__test/result' && req.method === 'POST') {
@@ -36,6 +39,7 @@ const server = await createServer({
             }
             const result = JSON.parse(body);
             fs.appendFileSync(path.join(run, 'results.jsonl'), JSON.stringify(result) + '\n');
+            completed.add(result.id);
             res.end('ok');
           } catch (e) { res.statusCode = 400; res.end(String(e)); }
           return;
