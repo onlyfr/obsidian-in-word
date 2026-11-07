@@ -2,8 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as temml from "temml";
 import { mathMLToElement, mathRenderer, sanitizeMathML } from "../src/plugins/math-impl";
 import { createRasterizer } from "../src/convert/mathraster";
-import {mathFontCss} from '../src/convert/math-font';
-vi.mock('../src/convert/math-font',()=>({prepareMathFont:vi.fn(async()=>{}),mathFontCss:"@font-face{font-family:'Owb Latin Modern Math';src:url('data:font/otf;base64,TEST')}math{font-family:'Owb Latin Modern Math' !important;}"}));
+import {renderMathSvg} from '../src/convert/math-svg';
 
 const NS = "http://www.w3.org/1998/Math/MathML";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -57,60 +56,33 @@ describe("MathML nodes built from an inert parse", () => {
   });
 });
 
-function rasterHost(html = '<math display="block" class="tml-display"><mi>x</mi></math>', css = 'math{color:black}') {
-  const sources: string[] = [];
-  vi.spyOn(mathRenderer, "load").mockResolvedValue(true);
-  vi.spyOn(mathRenderer, "mathml").mockReturnValue({html});
-  vi.spyOn(mathRenderer, "css", "get").mockReturnValue(css);
-  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function(this: Element) {
-    if (this.localName === "math") return {x:10,y:20,left:10,top:20,right:40.4,bottom:35.2,width:30.4,height:15.2,toJSON(){}};
-    if (this.localName === "span") return {x:40,y:32,left:40,top:32,right:40,bottom:32,width:0,height:0,toJSON(){}};
-    return {x:8,y:18,left:8,top:18,right:48,bottom:38,width:40,height:20,toJSON(){}};
-  });
-  vi.stubGlobal("Image", class {
-    onload?: () => void;
-    set src(value: string) { sources.push(value); queueMicrotask(() => this.onload?.()); }
-  });
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({drawImage(){},getImageData:()=>({data:new Uint8ClampedArray([0,0,0,255])})} as any);
-  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue('data:image/png;base64,AAAA');
-  return sources;
+
+vi.mock('../src/convert/math-svg',()=>({renderMathSvg:vi.fn()}));
+function rasterHost(viewBox='0 -1000 2000 1200'){
+ const sources:string[]=[];
+ vi.spyOn(mathRenderer,'load').mockResolvedValue(true);
+ vi.spyOn(mathRenderer,'mathml').mockReturnValue({html:'<math><mi>x</mi></math>'});
+ vi.mocked(renderMathSvg).mockImplementation(()=>{
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);return svg;
+ });
+ vi.stubGlobal('Image',class{onload?:()=>void;set src(url:string){sources.push(url);queueMicrotask(()=>this.onload?.());}});
+ vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({drawImage(){},getImageData:()=>({data:new Uint8ClampedArray([0,0,0,255])})} as any);
+ vi.spyOn(HTMLCanvasElement.prototype,'toDataURL').mockReturnValue('data:image/png;base64,AAAA');
+ return sources;
 }
-
-describe("rasterizer DOM assembly", () => {
-  it("renders without assigning innerHTML and serializes a namespaced SVG", async () => {
-    const sources = rasterHost();
-    vi.spyOn(Element.prototype,"innerHTML","set").mockImplementation(()=>{throw new Error('HTML sink used');});
-    const count = document.body.childElementCount;
-    const result = await (await createRasterizer()).render('x',true);
-    expect(result).toEqual({png:'AAAA',w:37,h:22,baseline:15,scale:3});
-    expect(document.body.childElementCount).toBe(count);
-    const xml = decodeURIComponent(sources[0].slice(sources[0].indexOf(',')+1));
-    const doc = new DOMParser().parseFromString(xml,"application/xml");
-    expect(doc.querySelector('parsererror')).toBeNull();
-    expect(doc.documentElement.namespaceURI).toBe('http://www.w3.org/2000/svg');
-    expect(doc.querySelector('foreignObject > div')!.namespaceURI).toBe('http://www.w3.org/1999/xhtml');
-    expect(doc.querySelector('math')!.namespaceURI).toBe(NS);
-    expect(doc.querySelector('math')!.getAttribute('display')).toBeNull();
-    expect(doc.querySelector('math')!.getAttribute('class')).not.toContain('tml-display');
-  });
-
-  it("keeps CSS closing tags and CDATA delimiters as text, even with unsanitized renderer output", async () => {
-    const css='math{color:black}/* ]]></style><img src=x onerror=bad()> */';
-    const sources=rasterHost('<math onload="bad()"><mtext>&lt;img src=x&gt;</mtext><script>bad()</script></math>',css);
-    await (await createRasterizer()).render('x',false);
-    const xml=decodeURIComponent(sources[0].slice(sources[0].indexOf(',')+1));
-    const doc=new DOMParser().parseFromString(xml,'application/xml');
-    expect(doc.querySelector('parsererror')).toBeNull();
-    expect(doc.querySelector('style')!.textContent).toBe(css+'\n'+mathFontCss);
-    expect(doc.querySelector('script,img,[onload],[onerror]')).toBeNull();
-    expect(doc.querySelector('mtext')!.textContent).toBe('<img src=x>');
-  });
-
-  it("removes the measuring host if layout fails", async () => {
-    rasterHost();
-    vi.spyOn(Element.prototype,'getBoundingClientRect').mockImplementation(()=>{throw new Error('layout failure');});
-    const count=document.body.childElementCount;
-    await expect((await createRasterizer()).render('x',false)).rejects.toThrow('layout failure');
-    expect(document.body.childElementCount).toBe(count);
-  });
+describe('MathJax raster output',()=>{
+ it('uses SVG font metrics for 11pt dimensions, padding and baseline without live HTML layout',async()=>{
+  const sources=rasterHost();
+  vi.spyOn(Element.prototype,'innerHTML','set').mockImplementation(()=>{throw new Error('HTML sink used');});
+  const result=await(await createRasterizer()).render('x',true);
+  expect(result.png).toBe('AAAA');expect(result.w).toBe(36);expect(result.h).toBe(24);
+  expect(result.baseline).toBeCloseTo(17.6666667);expect(result.scale).toBe(3);
+  const svg=new DOMParser().parseFromString(decodeURIComponent(sources[0].split(',').slice(1).join(',')),'application/xml').documentElement;
+  expect(svg.getAttribute('width')).toBe('36');expect(svg.getAttribute('height')).toBe('24');
+  expect(svg.getAttribute('color')).toBe('#000');expect(svg.querySelector('foreignObject')).toBeNull();
+  expect(renderMathSvg).toHaveBeenCalledWith(expect.stringContaining('<mi>x</mi>'),true);
+ });
+ it.each(['0 0 0 20','0 0 NaN 20','0 0 1000000 1000'])('refuses empty, invalid or excessive SVG geometry: %s',async viewBox=>{
+  rasterHost(viewBox);await expect((await createRasterizer()).render('x',false)).rejects.toThrow();
+ });
 });
