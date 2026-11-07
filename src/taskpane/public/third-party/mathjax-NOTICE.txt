@@ -3,6 +3,6 @@ https://github.com/mathjax/MathJax-src
 Copyright (c) 2009-2022 The MathJax Consortium
 Licensed under the Apache License, Version 2.0 (see mathjax-LICENSE.txt).
 
-The application bundles MathJax's MathML input, SVG output and default TeX glyph
-data in its lazy math image module. Application adapters sanitize the input and
-rebuild the generated SVG before exporting PNG. No MathJax code is modified.
+The application bundles MathJax's TeX input, selected local TeX extensions, SVG
+output and default TeX glyph data in its lazy math image module. Application
+adapters rebuild generated SVG before exporting PNG. No MathJax code is modified.

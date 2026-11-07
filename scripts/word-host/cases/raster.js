@@ -2,7 +2,10 @@ const {createRasterizer}=await import('/src/convert/mathraster.ts');
 const current=await createRasterizer();
 const reference=globalThis.rasterBaselineUrl?await(await import(globalThis.rasterBaselineUrl)).createRasterizer():null;
 const corpus=[String.raw`\boxed{E=mc^2}`,String.raw`A\xrightarrow[g]{f+h}B`,String.raw`\cancel{x}+\bcancel{abc}`,
- String.raw`\begin{pmatrix}1&0\\0&1\end{pmatrix}`,String.raw`\sum_{i=1}^{n}\frac{x_i}{\sqrt{y}}`,String.raw`\text{<img src=x onerror=alert(1)>}`];
+ String.raw`\begin{pmatrix}1&0\\0&1\end{pmatrix}`,String.raw`\sum_{i=1}^{n}\frac{x_i}{\sqrt{y}}`,String.raw`\text{<img src=x onerror=alert(1)>}`,
+ String.raw`\begin{aligned}a&=b+c\\longname&=d\end{aligned}`,
+ String.raw`\begin{align}a&=b+c\\longname&=d\end{align}`,
+ String.raw`\begin{alignedat}{2}a&=b+c&\qquad u&=v\\longname&=d&w&=z+q\end{alignedat}`];
 const samples=[];
 for(const latex of corpus)for(const display of [false,true]){
  const before=reference?await reference.render(latex,display):null;

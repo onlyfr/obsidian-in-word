@@ -53,6 +53,7 @@
 
 - [x] 긴급 패치: 모두 그림 옵션에서 내장 Latin Modern Math 적용. 캐시 버전 갱신·522건 테스트·실제 Word 이미지/모드 왕복 검증. 상세: `docs/testing/2026-11-07-latex-math-font.md`.
 - [x] 후속 요청: 이미지 글꼴을 Obsidian 기본 스타일의 MathJax TeX로 교체. 524건 테스트·실제 Word 검증. 상세: `docs/testing/2026-11-07-obsidian-math-font.md`.
+- [x] 정렬 회귀 수정: Temml 중간 변환 제거, 원본 TeX를 MathJax로 직접 해석. `align`/`aligned`/`alignedat` 정렬 좌표·528건 테스트·Word 왕복 검증. 상세: `docs/testing/2026-11-07-mathjax-tex-alignment.md`.
 
 - [ ] 수식 그림 글꼴: Word 문서 글꼴 / 기본 LaTeX 글꼴 선택. 렌더러·캐시·기존 수식과의 호환 검증 포함.
 - [ ] 수식 그림의 문서 글자 크기·색 대응.

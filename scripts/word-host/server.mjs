@@ -14,7 +14,10 @@ let nativeQueue = Promise.resolve();
 const server = await createServer({
   configFile: false,
   root: repo,
-  optimizeDeps: {include: ['@lezer/markdown']},
+  // Prebundle the lazy renderer before Word loads it: an optimizer-triggered reload would erase test globals.
+  optimizeDeps: {include: ['@lezer/markdown',...Array.from(
+    fs.readFileSync(path.join(repo,'src/convert/math-svg.ts'),'utf8').matchAll(/from '([^']+)'|import '([^']+)'/g),
+    match=>match[1]??match[2]).filter(name=>name.startsWith('mathjax-full/'))]},
   server: {
     host: 'localhost', port: Number(process.env.WORD_HOST_PORT), strictPort: true,
     https: {key: fs.readFileSync(path.join(certs, 'localhost.key')), cert: fs.readFileSync(path.join(certs, 'localhost.crt'))},
