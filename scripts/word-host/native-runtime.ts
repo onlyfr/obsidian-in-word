@@ -11,7 +11,10 @@ export function createNativeHarness(token: string) {
     selectionReads:0,
     async selectedKey(){host.selectionReads++;return request({op:'selectedKey'});},
     async candidate(){return request({op:'candidate'});},
-    async claim(candidate,key){host.operations.push({mode:'claim',key});return request({op:'claim',candidate,key});},
+    async claim(candidate,key){
+      host.operations.push({mode:'claim',key});const dropReply=host.dropReply;host.dropReply=false;
+      return request({op:'claim',candidate,key,dropReply});
+    },
     async read(key) {return request({op:"read",key});},
     async journals() {return request({op:"journals"});},
     async transition(change: NativeTransition) {
@@ -36,5 +39,5 @@ export function createNativeHarness(token: string) {
     stream.onerror=()=>connection.disconnect();
     return {driver,connection,stream,errors,signals,dispose(){stream.close();connection.disconnect();driver.dispose();}};
   }
-  return {host,port,session,ownership,connectSelection};
+  return {host,port,session,ownership,connectSelection,connection:()=>request({op:'connection'})};
 }

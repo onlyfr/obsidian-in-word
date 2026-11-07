@@ -1,0 +1,14 @@
+await reset('<p>First <strong>bold</strong> end.</p><p>Second <em>italic</em> end.</p><p>Outside plain.</p>');
+globalThis.controlsOriginal=await snapshot();
+const markup=new DOMParser().parseFromString(await (await fetch('/src/taskpane/index.html')).text(),'text/html');
+markup.body.querySelectorAll('script').forEach(script=>script.remove());document.body.innerHTML=markup.body.innerHTML;
+const css=document.createElement('link');css.rel='stylesheet';css.href='/src/taskpane/taskpane.css';document.head.append(css);
+await import('/src/taskpane/taskpane.ts');
+globalThis.waitControls=async(predicate,message)=>{const end=Date.now()+8000;while(Date.now()<end && !predicate())await new Promise(r=>setTimeout(r,25));must(predicate(),message+' / '+document.querySelector('[data-body-status]')?.textContent);};
+await waitControls(()=>!document.getElementById('plugin-files').disabled,'task pane ready');
+must(document.getElementById('body-controls').hidden,'ordinary task pane has no automatic native bridge connection');
+const {installBodyControlHarness}=await import('/scripts/word-host/body-controls-runtime.ts');
+globalThis.bodyUiHarness=installBodyControlHarness(nativeBodyToken);
+await waitControls(()=>!document.getElementById('body-controls').hidden,'explicit bridge injection mounts controls');
+must(bodyUiHarness.leases.length===0,'showing the controls does not open a native lease');
+return {installed:true,automaticConnection:false};

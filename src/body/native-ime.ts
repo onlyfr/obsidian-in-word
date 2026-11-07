@@ -8,6 +8,7 @@ export class NativeImeConnection {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private selection: number | null = null;
+  get isClosed():boolean{return this.closed;}
   constructor(private driver: Pick<BodySelectionDriver, "signal">, private epoch: string, private error: (e: unknown) => void, private timeout = 2500, private selectionChanged?: () => void) {}
 
   receive(value: unknown): void {

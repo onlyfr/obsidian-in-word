@@ -1,0 +1,13 @@
+document.querySelector('[data-body-start]').click();
+await waitControls(()=>document.getElementById('body-controls').dataset.state==='ready','start registers the selected paragraph');
+const operations=bodyUiHarness.harness.host.operations;
+must(operations.length===1 && operations[0].mode==='claim','stage 1 enrolls once without a source/render request');
+globalThis.bodyUiFirstKey=operations[0].key;
+document.querySelector('[data-body-stop]').click();
+await waitControls(()=>document.getElementById('body-controls').dataset.state==='stopped','stop completes');
+must(bodyUiHarness.leases.every(lease=>lease.closed),'stop releases the native subscription');
+document.querySelector('[data-body-start]').click();
+await waitControls(()=>document.getElementById('body-controls').dataset.state==='ready','restart reuses the owned rendered paragraph');
+must(operations.length===1,'restart does not wrap the same paragraph twice');
+must(JSON.stringify((await snapshot()).paragraphs)===JSON.stringify(controlsOriginal.paragraphs),'preparation does not rewrite Word text or styles');
+return {key:bodyUiFirstKey,claims:operations.length,state:'ready'};

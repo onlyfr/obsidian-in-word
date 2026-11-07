@@ -114,7 +114,9 @@ function New-NativeBodyPacket($change,[int]$FailAt=0){
 }
 function Invoke-NativeBodyRequest($Job) {
  if($doc.FullName -ne (Join-Path $root 'acceptance.docx')){throw 'Native host document identity changed.'}
+ if($wordTestApp.ActiveDocument.FullName -ne $doc.FullName){throw 'The scoped native document is not active.'}
  switch($Job.op){
+  'connection' {return @{epoch=$nativeImeEpoch;capabilities=@{ownership=($env:WORD_BODY_OWNERSHIP_MODE -eq '1');selection=$true}}}
   'read' {return Get-NativeBodySnapshot $Job.key}
   'journals' {return ,@(Get-NativeJournalParts|ForEach-Object{$_.data})}
   'selectedKey' {return Get-NativeSelectedKey}

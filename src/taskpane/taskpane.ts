@@ -3,6 +3,7 @@ import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { loadMathOutput, saveMathOutput,loadEditorPreferences,saveEditorPreferences,type EditorPreferences } from "./preferences";
 import {initSettingsDialog} from "./settings-dialog";
+import {bindBodyControls} from "./body-binding";
 import type { MathOutputMode } from "../convert/mathimg";
 
 // Heavy parts are separate chunks loaded after the first paint: the markdown language support (pulls in the
@@ -93,6 +94,7 @@ Office.onReady((info) => {
     setStatus("Word에서만 동작합니다.");
     return;
   }
+  bindBodyControls(document.getElementById('body-controls')!);
   document.getElementById("load")!.onclick = () =>
     run("불러오기", async () => {
       const { readSelectionAsMarkdown } = await loadWord();

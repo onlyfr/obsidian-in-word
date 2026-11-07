@@ -116,6 +116,7 @@ def main():
     parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
     parser.add_argument('--settings-ui-only', action='store_true', help='Run actual task-pane settings tabs/editor/plugin UI checks without keyboard input')
+    parser.add_argument('--body-controls-only', action='store_true', help='Run native body preparation start/stop UI checks without keyboard input')
     parser.add_argument('--format-only', action='store_true', help='Run only Markdown formatting round-trip regression cases')
     parser.add_argument('--native-guard-only', action='store_true', help='Build and test the native source-write boundary without keyboard injection')
     parser.add_argument('--native-flow-only', action='store_true', help='Run integrated native body transitions, selection and recovery (no keyboard injection)')
@@ -155,15 +156,15 @@ def main():
         (run / 'baseline-raster.ts').write_text(before, encoding='utf-8')
     manifest = run / 'manifest.xml'
     env = {**os.environ, 'WORD_HOST_RUN_DIR': str(run), 'WORD_HOST_PORT': str(port)}
-    if args.native_ime or args.native_guard_only or args.native_flow_only or args.native_selection_only or args.native_format_only:
+    if args.native_ime or args.native_guard_only or args.native_flow_only or args.native_selection_only or args.native_format_only or args.body_controls_only:
         output = run / 'native'
         subprocess.run(['powershell.exe', '-NoProfile', '-File', str(REPO / 'native/word-ime/build.ps1'), '-OutputDirectory', str(output)], check=True)
         env['WORD_IME_BRIDGE_EXE'] = str(output / 'word-ime-bridge.exe')
     native_token = uuid.uuid4().hex
-    if args.native_flow_only or args.native_selection_only or args.native_format_only:
+    if args.native_flow_only or args.native_selection_only or args.native_format_only or args.body_controls_only:
         env['WORD_BODY_NATIVE_MODE'] = '1'
         env['WORD_BODY_NATIVE_TOKEN'] = native_token
-    if args.native_selection_only or args.native_format_only:
+    if args.native_selection_only or args.native_format_only or args.body_controls_only:
         env['WORD_BODY_OWNERSHIP_MODE'] = '1'
     server = word = None
     registered = False
@@ -203,6 +204,24 @@ def main():
                 case('js','session-undo-recover','session-undo-recover.js')
                 case('com','session-delete','session-delete.ps1')
                 case('js','session-delete-check','session-delete-check.js')
+            if args.body_controls_only:
+                case('js','setup','setup.js')
+                native_case('body-controls-init','body-controls-init.js')
+                case('com','body-controls-place-first','native-selection-first.ps1')
+                case('com','native-ime-start','native-ime-start.ps1')
+                native_case('body-controls-start-stop','body-controls-start-stop.js')
+                case('com','body-controls-disconnect','body-controls-disconnect.ps1')
+                native_case('body-controls-disconnected','body-controls-disconnected.js')
+                case('com','native-ime-restart','native-ime-start.ps1')
+                case('com','body-controls-place-second','native-selection-second.ps1')
+                native_case('body-controls-stop-pending','body-controls-stop-pending.js')
+                case('com','body-controls-place-restart','native-selection-second.ps1')
+                native_case('body-controls-final','body-controls-final.js')
+                case('com','body-controls-place-lost','native-selection-outside.ps1')
+                native_case('body-controls-lost-stop','body-controls-lost-stop.js')
+                (run/'body-controls-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Body preparation controls passed. Evidence: {run}',flush=True)
+                return
             if args.settings_ui_only:
                 case('js','setup','setup.js')
                 case('js','settings-ui','settings-ui.js')
