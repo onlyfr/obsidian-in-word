@@ -20,6 +20,8 @@ MathJax 3.2.2 확장 `base`, `ams`, `newcommand`, `boldsymbol`, `braket`, `cance
 - 박스·취소선, 내장 글리프, SVG 안전 필터, 매크로 격리·잘못된 입력 거부 회귀 통과.
 - 실제 Word `16.0.20527.20150`: `npm run test:word -- --math-only` 통과. 인라인/블록 **18종** 래스터, hybrid/images 전환, 원본 LaTeX 왕복·반복 이미지 유지. 정렬 수식 2개를 실제 삽입하고 `&`·줄바꿈 보존 및 재적용 후 중복 없음을 확인. PNG 육안 확인.
 - 증거: `test-docs/word-host/20261107-201927-93dac2/math-summary.json`, `math-alignment.png`.
+- 후속 사용자 사례: 실제 Word 화면에서 `S`의 이미지 ID `6f98f7f9`, `P(A)\geq 0`의 ID `a02df1c9`를 읽었고 둘 다 렌더 버전 3의 해시와 일치했다. 이는 문서에 이전 그림이 남아 있다는 증거이며 현재 작업창 코드 버전까지 단정하지는 않는다. 같은 시점 GitHub Pages는 PR #38 배포 성공 및 최신 자산 `index-DEt9hrgw.js`를 확인했다. 사용자 Word는 확인 중 닫혀 문서 새로 적용은 수행하지 않았다.
+- 사용자가 제공한 포함배제 공식 전체(7행, 중간의 추가 `&` 포함)를 자동 Word 회귀에 추가했다. `test-docs/word-host/20261107-202639-2bdabc/math-summary.json`에서 7개 등호가 모두 x=7243.5, y=-3900…3900으로 일치하며, 이미지 삽입·LaTeX 왕복·재적용까지 통과. 원본 그림 660×136 CSS px, PNG 육안 확인. 기존 문서의 그림은 작업창 최신 코드 로드 후 불러오기·적용해야 갱신된다.
 - 시험 첫 실행은 Vite의 새 지연 의존성 탐색이 WebView를 다시 로드해 시험 전역 변수가 사라졌다. 서버가 렌더러의 MathJax 의존성을 사전 번들하도록 수정한 뒤 전체 실행 통과. 제품의 정렬 오류와는 별개인 시험 환경 문제다.
 - 메인 JS 361.41 kB / gzip 117.92 kB 유지. 이미지 지연 청크는 약 1,672 kB / gzip 583 kB이며 Vite 크기 안내가 발생한다.
 
