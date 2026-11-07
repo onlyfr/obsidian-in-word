@@ -60,8 +60,6 @@ describe("MathML nodes built from an inert parse", () => {
 vi.mock('../src/convert/math-svg',()=>({renderMathSvg:vi.fn()}));
 function rasterHost(viewBox='0 -1000 2000 1200'){
  const sources:string[]=[];
- vi.spyOn(mathRenderer,'load').mockResolvedValue(true);
- vi.spyOn(mathRenderer,'mathml').mockReturnValue({html:'<math><mi>x</mi></math>'});
  vi.mocked(renderMathSvg).mockImplementation(()=>{
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);return svg;
  });
@@ -80,7 +78,7 @@ describe('MathJax raster output',()=>{
   const svg=new DOMParser().parseFromString(decodeURIComponent(sources[0].split(',').slice(1).join(',')),'application/xml').documentElement;
   expect(svg.getAttribute('width')).toBe('36');expect(svg.getAttribute('height')).toBe('24');
   expect(svg.getAttribute('color')).toBe('#000');expect(svg.querySelector('foreignObject')).toBeNull();
-  expect(renderMathSvg).toHaveBeenCalledWith(expect.stringContaining('<mi>x</mi>'),true);
+  expect(renderMathSvg).toHaveBeenCalledWith('x',true);
  });
  it.each(['0 0 0 20','0 0 NaN 20','0 0 1000000 1000'])('refuses empty, invalid or excessive SVG geometry: %s',async viewBox=>{
   rasterHost(viewBox);await expect((await createRasterizer()).render('x',false)).rejects.toThrow();

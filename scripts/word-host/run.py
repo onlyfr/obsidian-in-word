@@ -230,6 +230,8 @@ def main():
                 preview=case('js','latex-font','latex-font.js')['value']
                 (run/'latex-font.png').write_bytes(base64.b64decode(preview['png']))
                 case('js','math-output','math-output.js')
+                alignment=case('js','math-alignment','math-alignment.js')['value']
+                (run/'math-alignment.png').write_bytes(base64.b64decode(alignment['png']))
                 (run/'math-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
                 print(f'Math checks passed. Evidence: {run}',flush=True)
                 return

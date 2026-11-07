@@ -1,5 +1,5 @@
 /**
- * The real {@link MathRasterizer}: Temml's sanitized MathML is drawn with MathJax's default TeX SVG glyphs
+ * The real {@link MathRasterizer}: original TeX is parsed and drawn by MathJax with its default TeX SVG glyphs
  * and drawn onto a canvas, then exported as a transparent PNG.
  *
  * MathJax SVG includes its own glyph paths; it needs no installed font or external font files.
@@ -7,7 +7,7 @@
  * run scripts or fetch resources and does not taint the canvas (measured, see docs/unsupported-syntax.md).
  * Text colour policy: black (#000) on a transparent background, whatever the page colour is.
  *
- * Browser only (DOM + canvas). LaTeX goes through the preview's Temml options and MathML sanitizer.
+ * Browser only (DOM + canvas). TeX extensions are bundled explicitly, with no dynamic loader or HTML commands.
  * Generated SVG is rebuilt with a geometry/text allowlist. Throws {@link RasterError}.
  */
 import { RasterError, type MathRasterizer, type RasterResult } from "./mathimg";
@@ -29,15 +29,11 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 export async function createRasterizer(): Promise<MathRasterizer> {
-  const { mathRenderer, mathMLToElement } = await import("../plugins/math-impl");
-  if (!(await mathRenderer.load())) throw new RasterError("unavailable", mathRenderer.error);
   return {
     async render(latex: string, display: boolean): Promise<RasterResult> {
-      const r = mathRenderer.mathml(latex, display);
-      if (r.html === undefined) throw new RasterError("unsupported", r.err);
-      const parsed = mathMLToElement(r.html);
-      if (!parsed) throw new RasterError("unsupported", "no <math>");
-      const svg=renderMathSvg(new XMLSerializer().serializeToString(parsed),display);
+      let svg:SVGSVGElement;
+      try{svg=renderMathSvg(latex,display);}
+      catch(error){throw new RasterError('unsupported',(error as Error).message);}
       // MathJax SVG uses 1000 units per em. Its y=0 is the formula baseline.
       const [x,y,width,height]=(svg.getAttribute('viewBox')??'').trim().split(/\s+/).map(Number);
       if(![x,y,width,height].every(Number.isFinite) || !(width>0 && height>0))throw new RasterError('blank','empty layout');

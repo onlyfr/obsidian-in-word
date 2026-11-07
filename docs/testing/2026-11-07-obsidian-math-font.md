@@ -1,5 +1,7 @@
 # Obsidian 스타일 수식 이미지
 
+이 기록은 PR #37 당시 결과다. 이후 `align`/`aligned` 정렬 회귀를 확인해 이미지의 Temml 중간 변환을 제거했다. 현재 경로와 검증은 `2026-11-07-mathjax-tex-alignment.md`를 참고한다.
+
 2026-11-07. 사용자 요청에 따라 PR #36의 Latin Modern Math 이미지를 MathJax 3 기본 TeX 글리프로 교체했다. Obsidian은 공식 도움말에서 수식 렌더러로 MathJax를 안내한다. 여기서는 기본 MathJax TeX 스타일을 기준으로 하며, 사용자별 Obsidian 테마·CSS·수식 플러그인의 변경 사항까지 동일하다고 보장하지 않는다.
 
 ## 범위
