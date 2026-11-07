@@ -1,0 +1,23 @@
+const {installBodyControlHarness}=await import('/scripts/word-host/body-controls-runtime.ts');
+globalThis.bodyUiLost=installBodyControlHarness(nativeBodyToken);
+await waitControls(()=>!document.getElementById('body-controls').hidden,'replacement provider mounted');
+const host=bodyUiLost.harness.host,original=host.claim;
+let issued=false,release;
+const gate=new Promise(resolve=>{release=resolve;});
+host.dropReply=true;
+host.claim=async(candidate,key)=>{
+ const outcome=original(candidate,key).then(value=>({value}),error=>({error}));
+ issued=true;await gate;const result=await outcome;if(result.error)throw result.error;return result.value;
+};
+document.querySelector('[data-body-start]').click();
+await waitControls(()=>issued,'claim request dispatched');
+document.querySelector('[data-body-stop]').click();
+must(document.getElementById('body-controls').dataset.state==='stopping','Stop still waits for the claim outcome');
+release();
+await waitControls(()=>document.getElementById('body-controls').dataset.state==='error','lost reply after Stop remains an unknown outcome');
+must(document.querySelector('[data-body-status]').textContent.includes('Ctrl+Z'),'unknown outcome keeps Word Undo guidance');
+must(host.operations.length===1 && host.operations[0].mode==='claim','lost claim is not replayed');
+must(bodyUiLost.leases.every(lease=>lease.closed),'unknown outcome closes the lease');
+must(JSON.stringify((await snapshot()).paragraphs)===JSON.stringify(controlsOriginal.paragraphs),'reply loss does not rewrite paragraph text');
+bodyUiLost.detach();
+return {unknownOutcome:true,claimRequests:host.operations.length,undoGuidance:true,documentTextUnchanged:true};

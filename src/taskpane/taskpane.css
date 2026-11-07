@@ -2,6 +2,11 @@
 body { margin: 0; font: 14px system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
 header { display: flex; gap: 8px; padding: 8px; }
 #open-settings { flex: none; }
+.body-controls { padding: 8px; border-top: 1px solid #8884; }
+.body-control-buttons { display: flex; align-items: center; gap: 8px; }
+.body-control-buttons strong { flex: 1; }
+.body-control-buttons button { flex: none; }
+.body-controls p { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
 button:disabled, select:disabled, input:disabled { cursor: wait; opacity: 0.6; }
 button { flex: 1; padding: 6px 8px; cursor: pointer; }
 #editor { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid #8884; }

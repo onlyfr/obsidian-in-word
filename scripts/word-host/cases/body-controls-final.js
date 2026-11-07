@@ -1,0 +1,12 @@
+document.querySelector('[data-body-start]').click();
+await waitControls(()=>document.getElementById('body-controls').dataset.state==='ready','restart after a completed stopped registration is idempotent');
+must(bodyUiHarness.harness.host.operations.length===2,'two paragraphs have exactly two enrollment mutations');
+document.querySelector('[data-body-stop]').click();
+await waitControls(()=>document.getElementById('body-controls').dataset.state==='stopped','final stop');
+must(bodyUiHarness.leases.every(lease=>lease.closed),'all native leases closed');
+const after=await snapshot();
+must(JSON.stringify(after.paragraphs)===JSON.stringify(controlsOriginal.paragraphs),'text and paragraph formatting unchanged');
+must(bodyUiHarness.harness.host.operations.every(operation=>operation.mode==='claim'),'no MD source/render/rollback writes');
+bodyUiHarness.detach();await new Promise(r=>setTimeout(r,50));
+must(document.getElementById('body-controls').hidden,'removing the native provider hides the controls');
+return {enrollments:2,allLeasesClosed:true,documentUnchanged:true,bodyConversion:false};

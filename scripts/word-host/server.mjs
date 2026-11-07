@@ -29,7 +29,7 @@ const server = await createServer({
               || req.headers.authorization !== `Bearer ${process.env.WORD_BODY_NATIVE_TOKEN}`) { res.writeHead(403).end(); return; }
           try {
             let body='';for await(const chunk of req){body+=chunk;if(body.length>2*1024*1024)throw new Error('Native request too large');}
-            const request=JSON.parse(body);if(!['read','journals','transition','selectedKey','candidate','claim'].includes(request.op))throw new Error('Unsupported native operation');
+            const request=JSON.parse(body);if(!['connection','read','journals','transition','selectedKey','candidate','claim'].includes(request.op))throw new Error('Unsupported native operation');
             const work=nativeQueue.then(async()=>{
               const id=randomUUID(), job={...request,id};
               const target=path.join(run,'native-body-request.json');
@@ -50,7 +50,7 @@ const server = await createServer({
             });
             nativeQueue=work.then(()=>{},()=>{});const result=await work;
             // Deterministic test-only reply loss: the worker has completed once; never replay it.
-            if(request.op==='transition' && request.dropReply===true){res.destroy();return;}
+            if(['transition','claim'].includes(request.op) && request.dropReply===true){res.destroy();return;}
             res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(JSON.stringify(result));
           } catch(e) {res.writeHead(500,{'Content-Type':'text/plain'}).end(String(e));}
           return;
