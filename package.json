@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:word": "python scripts/word-host/run.py",
+    "bench:math-svg": "node scripts/bench/math-svg.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

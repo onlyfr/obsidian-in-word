@@ -10,6 +10,7 @@ import 'mathjax-full/js/input/tex/enclose/EncloseConfiguration.js';
 import 'mathjax-full/js/input/tex/bbox/BboxConfiguration.js';
 import 'mathjax-full/js/input/tex/mathtools/MathtoolsConfiguration.js';
 import {SVG} from 'mathjax-full/js/output/svg.js';
+import {TeXFont} from 'mathjax-full/js/output/svg/fonts/tex.js';
 import {liteAdaptor} from 'mathjax-full/js/adaptors/liteAdaptor.js';
 import {RegisterHTMLHandler} from 'mathjax-full/js/handlers/html.js';
 
@@ -17,6 +18,8 @@ const adaptor=liteAdaptor();
 RegisterHTMLHandler(adaptor);
 // The default MathJax 3 TeX glyphs are paths, so neither OS fonts nor a CDN affect them.
 const packages=['base','ams','newcommand','boldsymbol','braket','cancel','color','enclose','bbox','mathtools'];
+// Font geometry is independent of TeX macros/labels. Reuse it while keeping parser and output state isolated.
+const font=new TeXFont();
 const NS='http://www.w3.org/2000/svg';
 const tags=new Set(['svg','g','path','rect','line','polyline','polygon','circle','ellipse','text','tspan']);
 const attrs=new Set(['viewBox','d','transform','x','y','x1','x2','y1','y2','width','height','rx','ry','r','cx','cy','points','fill','stroke','stroke-width','stroke-dasharray','stroke-linecap','stroke-linejoin','fill-rule','font-family','font-size','font-style','font-weight','text-anchor','dx','dy']);
@@ -48,7 +51,7 @@ export function renderMathSvg(latex:string,display:boolean):SVGSVGElement{
   // All extensions are bundled explicitly; require/autoload/HTML are not enabled.
   const input=new TeX({packages,tags:'none',maxBuffer:10000,maxMacros:1000,
     formatError:(_jax:unknown,error:Error)=>{throw error;}});
-  const renderer=mathjax.document('',{InputJax:input,OutputJax:new SVG({fontCache:'none'})});
+  const renderer=mathjax.document('',{InputJax:input,OutputJax:new SVG({fontCache:'none',font})});
   const output=renderer.convert(latex,{display});
   return safeMathSvg(adaptor.outerHTML(output));
 }

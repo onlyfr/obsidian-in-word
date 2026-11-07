@@ -203,11 +203,17 @@ describe("ladder decision", () => {
     };
     it("renderer cannot be loaded", async () => {
       const sc = new MemorySidecar();
-      const out = await resolveMathImages(items(`$${BOXED}$ $${XRA}$`), sc, async () => {
+      let loads=0;
+      const loader=async () => {
+        loads++;
         throw new Error("chunk failed");
-      });
+      };
+      const out = await resolveMathImages(items(`$${BOXED}$ $${XRA}$`), sc, loader);
       expect(out.map((o) => (o.kind === "literal" ? o.reason : "image"))).toEqual(["unavailable", "unavailable"]);
       expect([...sc.entries()]).toEqual([]);
+      expect(loads).toBe(1);
+      await resolveMathImages(items(`$${BOXED}$`), sc, loader);
+      expect(loads).toBe(2); // Failure is not permanent across applies.
     });
     it("render error / unsupported", async () => {
       const { out } = await run(() => {

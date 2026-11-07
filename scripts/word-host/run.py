@@ -155,6 +155,11 @@ def main():
             raise SystemExit('--compare-raster-ref must be a git commit hash')
         before = subprocess.run(['git', 'show', args.compare_raster_ref + ':src/convert/mathraster.ts'], cwd=REPO, check=True, capture_output=True).stdout.decode('utf-8')
         before = before.replace('from "./mathimg"', 'from "/src/convert/mathimg"').replace('import("../plugins/math-impl")', 'import("/src/plugins/math-impl")')
+        if re.search(r"from ['\"]\./math-svg['\"]", before):
+            svg_before = subprocess.run(['git', 'show', args.compare_raster_ref + ':src/convert/math-svg.ts'], cwd=REPO, check=True, capture_output=True).stdout.decode('utf-8')
+            (run / 'baseline-math-svg.ts').write_text(svg_before, encoding='utf-8')
+            svg_url = '/test-docs/word-host/' + run.name + '/baseline-math-svg.ts'
+            before = re.sub(r"from (['\"])\./math-svg\1", lambda match: 'from ' + json.dumps(svg_url), before)
         (run / 'baseline-raster.ts').write_text(before, encoding='utf-8')
     manifest = run / 'manifest.xml'
     env = {**os.environ, 'WORD_HOST_RUN_DIR': str(run), 'WORD_HOST_PORT': str(port)}
@@ -226,6 +231,9 @@ def main():
                 return
             if args.math_only:
                 case('js','setup','setup.js')
+                if args.compare_raster_ref:
+                    url = '/test-docs/word-host/' + run.name + '/baseline-raster.ts'
+                    command(run, 'js', 'raster-reference', 'globalThis.rasterBaselineUrl=' + json.dumps(url) + '; return true;', worker=word)
                 case('js','raster','raster.js')
                 preview=case('js','latex-font','latex-font.js')['value']
                 (run/'latex-font.png').write_bytes(base64.b64decode(preview['png']))
