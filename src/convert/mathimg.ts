@@ -153,10 +153,12 @@ export async function resolveMathImages(
     else if (item.latex.length > LIMITS.maxLatex) res = { kind: "literal", item, reason: "too-long" };
     else if (now() - started > LIMITS.budgetMs) res = { kind: "literal", item, reason: "timeout" };
     else {
-      try {
-        r ??= await rasterizer();
-      } catch {
-        r = null;
+      if(r===undefined){
+        try {
+          r = await rasterizer();
+        } catch {
+          r = null; // One failed load per apply; a subsequent apply may try again.
+        }
       }
       if (!r) res = { kind: "literal", item, reason: "unavailable" };
       else {
