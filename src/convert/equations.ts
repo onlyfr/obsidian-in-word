@@ -192,7 +192,7 @@ export function findMath(src: string): MathSpan[] {
 }
 
 /** Id of a LaTeX-as-image pair (`kind=mathimg`); the render version is part of it, so a new renderer re-renders. */
-export const MATHIMG_VERSION = 1;
+export const MATHIMG_VERSION = 2; // Latin Modern Math embedded in raster output; invalidate Cambria pictures.
 export const mathImgKey = (latex: string, display: boolean) => hashId(`mathimg:v${MATHIMG_VERSION}:${display ? "D" : "I"}:${latex}`);
 
 /** Sidecar ids the image rung would use for the math spans of `markdown` (to keep them when pruning). */

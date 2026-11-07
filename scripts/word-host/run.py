@@ -1,5 +1,6 @@
 """Run preservation cases in desktop Word through COM + the real Office.js task pane."""
 import argparse
+import base64
 import json
 import os
 import re
@@ -116,6 +117,7 @@ def main():
     parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
     parser.add_argument('--settings-ui-only', action='store_true', help='Run actual task-pane settings tabs/editor/plugin UI checks without keyboard input')
+    parser.add_argument('--math-only', action='store_true', help='Run actual raster and math output mode checks without keyboard input')
     parser.add_argument('--body-controls-only', action='store_true', help='Run native body preparation start/stop UI checks without keyboard input')
     parser.add_argument('--format-only', action='store_true', help='Run only Markdown formatting round-trip regression cases')
     parser.add_argument('--native-guard-only', action='store_true', help='Build and test the native source-write boundary without keyboard injection')
@@ -221,6 +223,15 @@ def main():
                 native_case('body-controls-lost-stop','body-controls-lost-stop.js')
                 (run/'body-controls-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
                 print(f'Body preparation controls passed. Evidence: {run}',flush=True)
+                return
+            if args.math_only:
+                case('js','setup','setup.js')
+                case('js','raster','raster.js')
+                preview=case('js','latex-font','latex-font.js')['value']
+                (run/'latex-font.png').write_bytes(base64.b64decode(preview['png']))
+                case('js','math-output','math-output.js')
+                (run/'math-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Math checks passed. Evidence: {run}',flush=True)
                 return
             if args.settings_ui_only:
                 case('js','setup','setup.js')

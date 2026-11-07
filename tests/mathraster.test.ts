@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as temml from "temml";
 import { mathMLToElement, mathRenderer, sanitizeMathML } from "../src/plugins/math-impl";
 import { createRasterizer } from "../src/convert/mathraster";
+import {mathFontCss} from '../src/convert/math-font';
+vi.mock('../src/convert/math-font',()=>({prepareMathFont:vi.fn(async()=>{}),mathFontCss:"@font-face{font-family:'Owb Latin Modern Math';src:url('data:font/otf;base64,TEST')}math{font-family:'Owb Latin Modern Math' !important;}"}));
 
 const NS = "http://www.w3.org/1998/Math/MathML";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -99,7 +101,7 @@ describe("rasterizer DOM assembly", () => {
     const xml=decodeURIComponent(sources[0].slice(sources[0].indexOf(',')+1));
     const doc=new DOMParser().parseFromString(xml,'application/xml');
     expect(doc.querySelector('parsererror')).toBeNull();
-    expect(doc.querySelector('style')!.textContent).toBe(css);
+    expect(doc.querySelector('style')!.textContent).toBe(css+'\n'+mathFontCss);
     expect(doc.querySelector('script,img,[onload],[onerror]')).toBeNull();
     expect(doc.querySelector('mtext')!.textContent).toBe('<img src=x>');
   });

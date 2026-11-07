@@ -2,8 +2,8 @@
  * The real {@link MathRasterizer}: Temml's (sanitized) MathML is put into an SVG `<foreignObject>`, loaded as an image
  * and drawn onto a canvas, then exported as a transparent PNG.
  *
- * Why this and not a pure-SVG renderer: Temml is already in the app (lazy chunk) and the system math font
- * (Cambria Math) is used, so no second renderer / font bundle is needed; an SVG that is loaded as an `<img>` cannot
+ * Temml is already in the app (lazy chunk). Latin Modern Math is bundled and embedded in the SVG;
+ * an SVG that is loaded as an `<img>` cannot
  * run scripts or fetch resources and does not taint the canvas (measured, see docs/unsupported-syntax.md).
  * Text colour policy: black (#000) on a transparent background, whatever the page colour is.
  *
@@ -12,6 +12,7 @@
  * second MathML allowlist check instead of reinserting HTML strings. Throws {@link RasterError}.
  */
 import { RasterError, type MathRasterizer, type RasterResult } from "./mathimg";
+import {mathFontCss,prepareMathFont} from './math-font';
 
 /** Body text size the picture is drawn for: Word's default 11 pt. */
 const FONT_PX = (11 * 96) / 72;
@@ -46,12 +47,13 @@ export async function createRasterizer(): Promise<MathRasterizer> {
   if (!(await mathRenderer.load())) throw new RasterError("unavailable", mathRenderer.error);
   return {
     async render(latex: string, display: boolean): Promise<RasterResult> {
+      await prepareMathFont();
       const r = mathRenderer.mathml(latex, display);
       if (r.html === undefined) throw new RasterError("unsupported", r.err);
       const parsed = mathMLToElement(r.html);
       if (!parsed) throw new RasterError("unsupported", "no <math>");
       const math = mathElement(parsed, display);
-      const css = mathRenderer.css;
+      const css = mathRenderer.css + '\n' + mathFontCss;
       const box = `font-size:${FONT_PX}px;line-height:normal;white-space:nowrap;color:#000;`;
       // A zero-size inline-block sits on the text baseline: it tells where the formula's baseline is.
       const probeElement = document.createElement("span");
