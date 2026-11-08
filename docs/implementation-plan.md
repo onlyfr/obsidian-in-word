@@ -31,7 +31,8 @@
 - [x] IndexedDB 트랜잭션 완료 후 저장 성공 처리. 실제 Word 저장/재열기에서 설치 버전·켜짐·플러그인 데이터 복원, 도우미 연결은 미복원.
 - [x] 단위 571건·타입체크·빌드. 실제 Word의 실시간 공식 목록/릴리스 다운로드와 합성 플러그인의 설치·적용·교체·설정·재열기. `docs/testing/2026-11-08-community-plugins.md`.
 - [x] 자체 포함 Windows x64 배포 EXE 빌드. 배포 EXE 직접 실행 검사는 자동 승인 검토에 차단되어 미확인; 개발 빌드의 실제 Word 연결과 구분해 기록.
-- [ ] 커밋·푸시·main 반영, Windows ZIP과 작업창 배포 결과 확인.
+- [x] 커밋·푸시·main 반영: https://github.com/onlyfr/obsidian-in-word/pull/43
+- [x] Windows ZIP과 작업창을 함께 게시하는 배포 워크플로 연결. 실제 실행 결과는 GitHub Actions에서 확인한다.
 
 이 작업은 사용자 요청으로 문서 글꼴 선택보다 먼저 처리했다. 문서 글꼴 선택과 본문 자동 전환의 기존 남은 항목은 그대로 유지한다.
 
