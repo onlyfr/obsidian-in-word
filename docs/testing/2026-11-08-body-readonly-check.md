@@ -16,6 +16,7 @@
 - 단위 테스트 **543건**, 타입체크·프로덕션 빌드 통과. 상태 확인 전후 무쓰기, 재시작 재검사, 다른 문단의 중단 기록·source/삭제/이전 epoch, 중복/불완전 기록, 검사 도중 본문·선택·기록 변경, idle 대기 중 취소 검증.
 - 실제 Word `16.0.20527.20150`: `npm run test:word -- --body-check-only` 통과.
 - 증거: `test-docs/word-host/20261108-122816-cf0ef4/body-check-summary.json`.
+- 기존 시작/중지 전체 회귀 `npm run test:word -- --body-controls-only`도 통과. 실제 관찰기 종료·재연결·등록 중 중지·중지 후 응답 손실·재시작 중복 방지 유지. 증거: `test-docs/word-host/20261108-123204-fec775/body-controls-summary.json`.
 - 정상 등록 문단의 상태 확인은 본문/서식을 유지하고 lease를 닫았다. 등록되지 않은 영역 검사도 claim/transition 0회.
 - 실제 한 글자 삽입을 Undo한 후 상태 확인, **Redo 1회로 삽입 복원 성공**. 읽기 전용 확인이 Redo를 지우지 않았다.
 - 네이티브 원본 전환의 tagged 단계에서 실제 실패 주입. 상태 확인은 재전송 없이 거부. Undo 2회 후 원래 표시 텍스트가 복원됐지만 **source 태그가 남은 상태**에서도 거부했다. 이어서 **Redo 2회 성공**, 실패 직후 본문·태그가 동일하게 돌아왔다.
