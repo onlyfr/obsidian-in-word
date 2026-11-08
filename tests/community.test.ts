@@ -1,11 +1,23 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {downloadCommunityPlugin,fetchCommunityCatalog,parseCommunityCatalog,releaseManifest,searchCommunityPlugins} from '../src/plugins/community';
-import {connectCommunityDownloader} from '../src/plugins/community-connection';
+import {connectCommunityDownloader,connectWindowsHost} from '../src/plugins/community-connection';
 
 const item={id:'example',name:'Example',author:'Maker',description:'Math editor tools',repo:'maker/example'};
 const release={tag_name:'1.2.3',draft:false,prerelease:false,assets:[{id:1,name:'manifest.json',size:100},{id:2,name:'main.js',size:100}]};
 const json=(value:unknown)=>new Response(JSON.stringify(value));
-afterEach(()=>vi.unstubAllGlobals());
+afterEach(()=>{vi.unstubAllGlobals();document.querySelectorAll('meta[name=oiw-windows-host]').forEach(node=>node.remove());});
+it('does not discover a Windows host from an ordinary web pane and refuses a forged marker origin',async()=>{
+ const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);expect(await connectWindowsHost()).toBeNull();
+ const marker=document.createElement('meta');marker.name='oiw-windows-host';marker.content='1';document.head.append(marker);
+ await expect(connectWindowsHost()).rejects.toThrow('출처');expect(fetcher).not.toHaveBeenCalled();
+});
+it('bootstraps the bundled Windows pane only from its own origin without persisting credentials',async()=>{
+ const marker=document.createElement('meta');marker.name='oiw-windows-host';marker.content='1';document.head.append(marker);
+ vi.stubGlobal('location',{origin:'https://localhost:49175'});
+ const fetcher=vi.fn(async(url:RequestInfo|URL)=>String(url)==='/host-session'?json({protocol:1,capabilities:{downloads:true},token:'b'.repeat(64)}):json({protocol:1}));
+ vi.stubGlobal('fetch',fetcher);expect(await connectWindowsHost()).toBeTypeOf('function');
+ expect(fetcher.mock.calls[0][0]).toBe('/host-session');
+});
 it('searches official catalog text with all terms and permits existing legacy IDs/repos',()=>{
  const items=parseCommunityCatalog([item,{...item,id:'legacy.id',repo:'maker/-legacy'}]);
  expect(searchCommunityPlugins(items,'MAKER math')).toHaveLength(2);expect(searchCommunityPlugins(items,'not-there')).toEqual([]);

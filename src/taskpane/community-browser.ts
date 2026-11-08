@@ -1,5 +1,5 @@
 import {downloadCommunityPlugin,fetchCommunityCatalog,searchCommunityPlugins,type CommunityPlugin,type CommunityAssetReader} from '../plugins/community';
-import {connectCommunityDownloader} from '../plugins/community-connection';
+import {connectCommunityDownloader,connectWindowsHost} from '../plugins/community-connection';
 import type {StoredPlugin} from '../plugins/storage';
 
 const PAGE_SIZE=20;
@@ -70,5 +70,13 @@ export function initCommunityBrowser(options:{
   disconnect.onclick=()=>{readAsset=undefined;connection.value='';get('community-connection-status').textContent='도우미 연결 해제됨';render();};
   previous.onclick=()=>{page=Math.max(0,page-1);render();};next.onclick=()=>{page++;render();};
   render();
+  if(document.querySelector('meta[name="oiw-windows-host"][content="1"]')){
+    void options.runOperation(async()=>{
+      const info=get('community-connection-status');
+      try{readAsset=(await connectWindowsHost())??undefined;info.textContent='Windows 앱 연결됨 · 별도 다운로드 도우미가 필요 없습니다.';
+        connection.closest('details')!.hidden=true;status.textContent='Windows 앱에서 다운로드를 제공합니다. 공식 목록을 불러와 검색하세요.';}
+      catch(error){info.textContent=`Windows 앱 연결 실패: ${(error as Error).message}`;}
+    });
+  }
   return {refresh:render,setBusy(value:boolean){busy=value;render();}};
 }
