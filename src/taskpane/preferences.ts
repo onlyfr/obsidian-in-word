@@ -1,5 +1,12 @@
 import type { MathOutputMode } from "../convert/mathimg";
-import {normalizeMathAppearance,type MathAppearance} from '../convert/math-appearance';
+import {normalizeMathAppearance,type MathAppearance,type MathAppearanceSource} from '../convert/math-appearance';
+const MATH_APPEARANCE_SOURCE_KEY='oiw:math-image-appearance-source';
+export function loadMathAppearanceSource():MathAppearanceSource{
+  try{return localStorage.getItem(MATH_APPEARANCE_SOURCE_KEY)==='selection'?'selection':'manual';}catch{return 'manual';}
+}
+export function saveMathAppearanceSource(value:MathAppearanceSource):void{
+  try{localStorage.setItem(MATH_APPEARANCE_SOURCE_KEY,value==='selection'?'selection':'manual');}catch{/* Active choice still works. */}
+}
 const MATH_APPEARANCE_KEY='oiw:math-image-appearance';
 export function loadMathAppearance():MathAppearance{
   try{return normalizeMathAppearance(JSON.parse(localStorage.getItem(MATH_APPEARANCE_KEY)??'null'));}catch{return normalizeMathAppearance();}

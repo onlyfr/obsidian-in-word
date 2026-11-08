@@ -17,6 +17,12 @@ must(JSON.parse(localStorage.getItem('oiw:math-image-appearance')).sizePt===16,'
 must(JSON.parse(localStorage.getItem('oiw:math-image-appearance')).color==='#2457a6','math image colour stored');
 math.value='hybrid';math.dispatchEvent(new Event('change'));must(mathSize.disabled && mathColor.disabled,'image style inactive for hybrid');
 math.value='images';math.dispatchEvent(new Event('change'));
+const source=document.getElementById('math-appearance-source');
+source.value='selection';source.dispatchEvent(new Event('change'));
+must(mathSize.disabled && mathColor.disabled && !source.disabled,'selection source disables manual inputs');
+must(localStorage.getItem('oiw:math-image-appearance-source')==='selection','selection source persisted');
+source.value='manual';source.dispatchEvent(new Event('change'));
+must(!mathSize.disabled && mathSize.value==='16' && mathColor.value==='#2457a6','manual values survive source switch');
 must(localStorage.getItem('oiw:math-output')==='images','math output saved from option tab');
 const numbers=document.getElementById('editor-line-numbers');numbers.checked=false;numbers.dispatchEvent(new Event('change'));
 const wrap=document.getElementById('editor-wrap');wrap.checked=false;wrap.dispatchEvent(new Event('change'));

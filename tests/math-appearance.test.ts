@@ -1,10 +1,21 @@
 import {afterEach,expect,it} from 'vitest';
-import {normalizeMathAppearance,mathAppearanceKey} from '../src/convert/math-appearance';
-import {loadMathAppearance,saveMathAppearance} from '../src/taskpane/preferences';
+import {normalizeMathAppearance,mathAppearanceKey,selectionMathAppearance} from '../src/convert/math-appearance';
+import {loadMathAppearance,saveMathAppearance,loadMathAppearanceSource,saveMathAppearanceSource} from '../src/taskpane/preferences';
 import {MemorySidecar} from '../src/convert/sidecar';
 import {renderWithSidecar} from '../src/convert/obsidian';
 import {applyMathImages} from '../src/convert/mathimg';
 afterEach(()=>localStorage.clear());
+it('requires a definite supported selection style instead of guessing mixed formatting',()=>{
+ expect(selectionMathAppearance({size:18.5,color:'#2457A6'})).toEqual({sizePt:18.5,color:'#2457a6'});
+ for(const font of [{size:0,color:'#000000'},{size:18,color:''},{size:null,color:null},{size:40,color:'#000000'},{size:12.25,color:'#000000'},{size:12,color:'Automatic'}])
+   expect(()=>selectionMathAppearance(font)).toThrow('직접 지정');
+});
+it('persists the selection source separately without losing manual values',()=>{
+ expect(loadMathAppearanceSource()).toBe('manual');
+ saveMathAppearance({sizePt:16,color:'#123456'});saveMathAppearanceSource('selection');
+ expect(loadMathAppearanceSource()).toBe('selection');expect(loadMathAppearance()).toEqual({sizePt:16,color:'#123456'});
+ localStorage.setItem('oiw:math-image-appearance-source','bad');expect(loadMathAppearanceSource()).toBe('manual');
+});
 it('normalizes safe size/colour values and keeps default cache identity',()=>{
  expect(normalizeMathAppearance({sizePt:999,color:'url(evil)'})).toEqual({sizePt:11,color:'#000000'});
  expect(normalizeMathAppearance({sizePt:12.2,color:'#ABCDEF'})).toEqual({sizePt:12,color:'#abcdef'});

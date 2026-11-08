@@ -1,6 +1,6 @@
 import { leftoverChecks } from "./markers";
 import type { MathOutputMode } from "../convert/mathimg";
-import type {MathAppearance} from '../convert/math-appearance';
+import {selectionMathAppearance,type MathAppearance,type MathAppearanceSource} from '../convert/math-appearance';
 import { trailingBlankParagraphs } from "../convert/trailing-blanks";
 import { hashId, normText, placeholderIds, type FloatBlock, type FloatReport } from "../convert/blocks";
 import {
@@ -242,7 +242,7 @@ export async function replaceSelectionWithMarkdown(
   markdown: string,
   /** Asks the user (true = go on) when the selection is not the region that was last loaded/applied. */
   confirm?: (message: string) => Promise<boolean>,
-  options: { mathOutput?: MathOutputMode;mathAppearance?:MathAppearance } = {},
+  options: { mathOutput?: MathOutputMode;mathAppearance?:MathAppearance;mathAppearanceSource?:MathAppearanceSource } = {},
 ): Promise<ApplyResult> {
   return Word.run(async (context) => {
     // A collapsed selection (just a cursor) cannot be read (getHtml throws GeneralException), and replacing it would
@@ -313,7 +313,15 @@ export async function replaceSelectionWithMarkdown(
     let pictures = new Map<string, { body: string; rels: string; parts: string }>();
     const mathNotes: string[] = [];
     if (equations.some((q) => q.img) || (options.mathOutput === "images" && equations.length)) {
-      const plan = await (await import("../convert/mathimg")).applyMathImages(html0, equations, sidecar, undefined, options.mathOutput,options.mathAppearance);
+      let appearance=options.mathAppearance;
+      if(options.mathOutput==='images' && options.mathAppearanceSource==='selection'){
+        const font=sel0.font;
+        font.load('size,color');
+        await context.sync();
+        appearance=selectionMathAppearance(font);
+        mathNotes.push(`선택 영역 서식: 수식 그림 ${appearance.sizePt}pt · ${appearance.color}`);
+      }
+      const plan = await (await import("../convert/mathimg")).applyMathImages(html0, equations, sidecar, undefined, options.mathOutput,appearance);
       ({ html, active, pictures } = plan);
       mathNotes.push(...plan.notes);
     }
