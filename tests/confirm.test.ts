@@ -17,4 +17,10 @@ describe("askConfirm (window.confirm is unsupported in Word's task pane)", () =>
     (host.querySelector("#inline-confirm-no") as HTMLButtonElement).click();
     expect(await p).toBe(false);
   });
+  it('cancels a pending plugin replacement when its settings dialog closes',async()=>{
+    const dialog=document.createElement('dialog'),host=document.createElement('div');dialog.append(host);dialog.setAttribute('open','');
+    const pending=askConfirm(host,'replace downloaded version?');dialog.removeAttribute('open');dialog.dispatchEvent(new Event('close'));
+    expect(await pending).toBe(false);expect(host.querySelector('.inline-confirm')).toBeNull();
+    expect(await askConfirm(host,'already closed')).toBe(false);expect(host.children).toHaveLength(0);
+  });
 });

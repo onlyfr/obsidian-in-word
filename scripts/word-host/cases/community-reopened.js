@@ -1,0 +1,13 @@
+const must=(ok,message)=>{if(!ok)throw new Error('ASSERT: '+message);};
+const markup=new DOMParser().parseFromString(await(await fetch('/src/taskpane/index.html')).text(),'text/html');markup.body.querySelectorAll('script').forEach(script=>script.remove());document.body.innerHTML=markup.body.innerHTML;
+await import('/src/taskpane/taskpane.ts');
+const wait=async(predicate,message)=>{const end=Date.now()+10000;while(Date.now()<end && !predicate())await new Promise(r=>setTimeout(r,25));must(predicate(),message);};
+const row=()=>document.querySelector('[data-plugin-id="community-download-fixture"]');
+await wait(()=>row()?.textContent.includes('로드됨') && row().textContent.includes('2.0.0'),'downloaded enabled plugin restored after actual Word reopen');
+const {LocalDataStore}=await import('/src/plugins/storage.ts');must(new LocalDataStore().get('community-download-fixture').kept==='fixture-data','downloaded plugin settings persist after reopen');
+must(document.getElementById('community-connection-status').textContent.includes('미연결'),'helper connection/token not persisted');
+must(document.body.dataset.communityRuns==='1','restored plugin loaded once in new WebView');
+const buttons=()=>Array.from(row().querySelectorAll('button'));
+buttons().find(b=>b.textContent==='끄기').click();await wait(()=>buttons().some(b=>b.textContent==='켜기' && !b.disabled),'downloaded plugin can stop');
+buttons().find(b=>b.textContent==='삭제').click();await wait(()=>!row(),'downloaded plugin can be removed');
+return {restoredEnabled:true,version:'2.0.0',settingsRetained:true,connectionNotPersisted:true,stoppedAndRemoved:true};

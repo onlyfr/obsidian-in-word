@@ -67,6 +67,22 @@
       <p class="warn">플러그인은 불러온 JS 코드를 이 작업창에서 그대로 실행합니다. 신뢰하는 것만 사용하세요. 작업창 에디터 안에서만 동작합니다.</p>
       <div id="plugin-main">
         <p id="plugin-loading" role="status">플러그인을 불러오는 중…</p>
+        <fieldset class="option-group" id="community-browser">
+          <legend>커뮤니티 플러그인 찾기</legend>
+          <button id="community-load" type="button" disabled>공식 목록 불러오기</button>
+          <label class="option-row" for="community-search">검색<input id="community-search" type="search" placeholder="이름, 설명, 제작자" disabled /></label>
+          <p class="option-help">공식 Obsidian 목록은 바로 검색할 수 있습니다. 다운로드하려면 아래 Windows 도우미를 연결하세요. GitHub 정식 릴리스를 내려받은 뒤 설치 목록의 ‘켜기’로 적용합니다. Obsidian 전용 API·Node/Electron·보관함 기능은 지원되지 않을 수 있습니다.</p>
+          <p id="community-status" role="status" aria-live="polite">목록을 불러와 검색할 수 있습니다.</p>
+          <details><summary>다운로드 도우미 연결</summary>
+            <p class="option-help"><a href="./downloads/word-plugin-downloader.zip" download target="_blank" rel="noopener noreferrer">Windows 다운로드 도우미 받기</a> → 압축을 풀고 WordPluginDownloader.exe를 실행하세요. 도우미 창의 연결 주소를 복사해 붙여넣으세요. 도우미를 닫으면 다운로드 연결도 종료됩니다.</p>
+            <label class="option-row" for="community-connection">연결 주소<input id="community-connection" type="password" autocomplete="off" placeholder="도우미 창에서 복사한 주소" /></label>
+            <button id="community-connect" type="button">연결</button><button id="community-disconnect" type="button" disabled>연결 해제</button>
+            <p id="community-connection-status" role="status">도우미 미연결 · 목록 검색은 사용할 수 있습니다.</p>
+          </details>
+          <div id="community-results"></div>
+          <div class="community-pages" hidden id="community-pages"><button id="community-prev" type="button">이전</button><span id="community-page"></span><button id="community-next" type="button">다음</button></div>
+        </fieldset>
+        <h3>설치한 플러그인</h3>
         <label for="plugin-files">manifest.json과 main.js를 함께 선택하세요. styles.css는 선택입니다.</label>
         <input id="plugin-files" type="file" multiple accept=".js,.json,.css" disabled />
         <div id="plugin-list"></div>

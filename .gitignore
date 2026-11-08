@@ -3,3 +3,5 @@ dist/
 certs/
 test-docs/
 dist-exp/
+native/plugin-downloader/bin/
+native/plugin-downloader/obj/

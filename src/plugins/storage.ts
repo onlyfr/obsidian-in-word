@@ -5,6 +5,7 @@ export interface StoredPlugin {
   mainJs: string;
   stylesCss?: string;
   enabled: boolean;
+  source?: {repo:string;tag:string;releaseUrl:string};
 }
 
 /** Plugin settings (data.json): synchronous, backed by localStorage when available. */
@@ -57,13 +58,13 @@ export class PluginLibrary {
   private async tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T | undefined> {
     const db = await this.open();
     if (!db) return undefined;
-    return new Promise((resolve) => {
+    return new Promise((resolve,reject) => {
       try {
-        const req = fn(db.transaction("plugins", mode).objectStore("plugins"));
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => resolve(undefined);
-      } catch {
-        resolve(undefined);
+        const tx=db.transaction("plugins",mode),req=fn(tx.objectStore("plugins"));
+        tx.oncomplete=()=>resolve(req.result);
+        tx.onabort=tx.onerror=()=>reject(new Error('플러그인 저장소 작업에 실패했습니다. 저장 공간을 확인하세요.'));
+      } catch (error) {
+        reject(error);
       }
     });
   }
@@ -72,12 +73,14 @@ export class PluginLibrary {
     const stored = (await this.tx("readonly", (s) => s.getAll() as IDBRequest<StoredPlugin[]>)) ?? [];
     return stored.length ? stored : [...this.mem.values()];
   }
-  async save(p: StoredPlugin): Promise<void> {
-    this.mem.set(p.manifest.id, p);
+  async save(p: StoredPlugin): Promise<'persistent'|'session'> {
+    const persistent=!!(await this.open());
     await this.tx("readwrite", (s) => s.put(p, p.manifest.id));
+    this.mem.set(p.manifest.id, p);
+    return persistent?'persistent':'session';
   }
   async remove(id: string): Promise<void> {
-    this.mem.delete(id);
     await this.tx("readwrite", (s) => s.delete(id));
+    this.mem.delete(id);
   }
 }
