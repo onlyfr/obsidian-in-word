@@ -3,6 +3,8 @@
  * ("Function window.confirm is not supported"), so ask with buttons inside the page instead.
  */
 export function askConfirm(parent: HTMLElement, message: string, yes = "계속", no = "취소"): Promise<boolean> {
+  const dialog=parent.closest('dialog');
+  if(dialog && !dialog.open)return Promise.resolve(false);
   return new Promise((resolve) => {
     const box = document.createElement("div");
     box.className = "inline-confirm";
@@ -16,9 +18,12 @@ export function askConfirm(parent: HTMLElement, message: string, yes = "계속",
     cancel.id = "inline-confirm-no";
     cancel.textContent = no;
     const done = (v: boolean) => {
+      dialog?.removeEventListener('close',closed);
       box.remove();
       resolve(v);
     };
+    const closed=()=>done(false);
+    dialog?.addEventListener('close',closed,{once:true});
     ok.onclick = () => done(true);
     cancel.onclick = () => done(false);
     box.append(text, ok, cancel);

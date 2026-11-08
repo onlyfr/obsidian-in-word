@@ -35,7 +35,11 @@ button { flex: 1; padding: 6px 8px; cursor: pointer; }
 #plugin-files { max-width: 100%; }
 #plugins .warn { margin: 4px 0; font-size: 12px; opacity: 0.8; }
 .plugin-row { margin: 6px 0; }
-.plugin-name { display: flex; gap: 6px; align-items: center; font-weight: 600; }
+.plugin-name { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-weight: 600; }
+.community-result { border-top: 1px solid #8884; padding: 10px 0; }
+.community-result > button { display: block; margin-top: 6px; }
+.community-pages { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+#community-search { min-width: 0; max-width: 100%; }
 .plugin-name button { flex: none; padding: 2px 6px; }
 .plugin-report { font-size: 12px; opacity: 0.85; }
 .cmd-row { display: flex; gap: 6px; margin-top: 6px; }

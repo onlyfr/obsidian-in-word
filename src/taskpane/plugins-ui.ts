@@ -4,6 +4,7 @@ import { ObsidianEditor } from "../plugins/editor";
 import { MarkdownView, PluginHost, type CompatReport, type PluginManifest, type SettingTabLike } from "../plugins/host";
 import { askConfirm } from "./confirm";
 import { LocalDataStore, PluginLibrary, type StoredPlugin } from "../plugins/storage";
+import {initCommunityBrowser} from './community-browser';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -23,6 +24,14 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
   const list = $("plugin-list");
   const select = $<HTMLSelectElement>("plugin-commands");
   let plugins: StoredPlugin[] = [];
+  let changing=false;
+  let browser:ReturnType<typeof initCommunityBrowser>|undefined;
+  const runOperation=async(action:()=>Promise<void>)=>{
+    if(changing)return;
+    changing=true;render();browser?.setBusy(true);
+    try{await action();}catch(error){setStatus(`플러그인 작업 실패: ${(error as Error).message}`);}
+    finally{changing=false;render();browser?.setBusy(false);}
+  };
 
   // --- settings panel (PluginSettingTab) -------------------------------------------------------------------------
   const panel = $("plugin-settings");
@@ -117,36 +126,43 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
         row.dataset.pluginId=p.manifest.id;
         const head = el("div", `${p.manifest.name} ${p.manifest.version ?? ""}`, "plugin-name");
         const toggle = el("button", p.enabled ? "끄기" : "켜기");
-        toggle.onclick = async () => {
-          p.enabled = !p.enabled;
+        toggle.disabled=changing;
+        toggle.onclick = () => runOperation(async () => {
+          const next={...p,enabled:!p.enabled};
+          await library.save(next);
+          plugins=plugins.map(item=>item===p?next:item);
           if (open?.id === p.manifest.id) closeSettings();
-          await library.save(p);
-          p.enabled ? await host.load(p.manifest, p.mainJs, p.stylesCss) : host.unload(p.manifest.id);
+          next.enabled ? await host.load(next.manifest, next.mainJs, next.stylesCss) : host.unload(p.manifest.id);
           render();
-        };
+        });
         const del = el("button", "삭제");
-        del.onclick = async () => {
+        del.disabled=changing;
+        del.onclick = () => runOperation(async () => {
+          await library.remove(p.manifest.id);
           if (open?.id === p.manifest.id) closeSettings();
           host.unload(p.manifest.id);
-          await library.remove(p.manifest.id);
           plugins = plugins.filter((x) => x !== p);
           render();
-        };
+        });
         head.append(toggle, del);
         if (p.enabled && host.settingTabs(p.manifest.id).length) {
           const set = el("button", "설정");
+          set.disabled=changing;
           set.id = `plugin-settings-btn-${p.manifest.id}`;
           set.onclick = () => openSettings(p.manifest.id);
           head.prepend(set);
         }
         row.append(head, renderReport(host.reports.get(p.manifest.id), p.enabled));
+        if(p.source)row.append(el('p',`출처: ${p.source.repo} · ${p.source.tag}`,'option-help'));
         return row;
       }),
     );
     if(!plugins.length)list.append(el("p","불러온 플러그인이 없습니다.","option-help"));
     const commands=host.commands();
     select.replaceChildren(...commands.map((c) => Object.assign(document.createElement("option"), { value: c.id, textContent: c.name })));
-    select.disabled=commands.length===0;$<HTMLButtonElement>("plugin-run").disabled=commands.length===0;
+    select.disabled=changing || commands.length===0;$<HTMLButtonElement>("plugin-run").disabled=changing || commands.length===0;
+    $<HTMLInputElement>('plugin-files').disabled=changing;
+    browser?.refresh();
   };
 
   host.onChange = () => {
@@ -161,8 +177,10 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
   };
 
   $<HTMLInputElement>("plugin-files").onchange = async (ev) => {
+    if(changing)return;
     const files = Array.from((ev.target as HTMLInputElement).files ?? []);
     const text = (name: string) => files.find((f) => f.name === name)?.text();
+    await runOperation(async()=>{
     try {
       const manifestText = await text("manifest.json");
       const mainJs = await text("main.js");
@@ -180,10 +198,22 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
     } finally {
       (ev.target as HTMLInputElement).value = "";
     }
+    });
   };
 
   plugins = await library.list();
   for (const p of plugins.filter((x) => x.enabled)) await host.load(p.manifest, p.mainJs, p.stylesCss);
+  browser=initCommunityBrowser({installed:()=>plugins,runOperation,install:async stored=>{
+    const old=plugins.find(p=>p.manifest.id===stored.manifest.id);
+    if(old && !(await askConfirm($("plugins"),`${stored.manifest.name}: 설치된 ${old.manifest.version??'버전 미상'}을 ${stored.manifest.version} (${stored.source?.tag})로 교체할까요? 교체 후에는 꺼짐 상태입니다.`, '교체','취소')))return false;
+    const durability=await library.save(stored);
+    if(durability==='session')setStatus('플러그인은 현재 작업창 세션에만 저장됐습니다. 저장소를 사용할 수 없어 다시 열면 재설치가 필요합니다.');
+    if(open?.id===stored.manifest.id)closeSettings();
+    host.unload(stored.manifest.id);
+    plugins=[...plugins.filter(p=>p.manifest.id!==stored.manifest.id),stored];
+    render();
+    return true;
+  }});
   render();
   $<HTMLInputElement>("plugin-files").disabled=false;
   $("plugin-loading").hidden=true;
