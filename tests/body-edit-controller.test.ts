@@ -103,3 +103,22 @@ it('reports unknown registration outcome with Word Undo and never retries',async
  const f=fixture();f.host.claim.mockRejectedValue(new Error('reply lost'));await f.controller.start();f.emit();await tick();
  expect(f.controller.state.phase).toBe('error');expect(f.controller.state.message).toContain('Ctrl+Z');f.emit();await tick();expect(f.host.claim).toHaveBeenCalledOnce();
 });
+it('inspects an unregistered selection without claiming it, then closes the lease',async()=>{
+ const f=fixture();await f.controller.check();f.emit();await tick();
+ expect(f.controller.state.phase).toBe('checked');expect(f.host.claim).not.toHaveBeenCalled();expect(f.host.candidate).not.toHaveBeenCalled();
+ expect(f.link.close).toHaveBeenCalledOnce();expect(f.host.transition).not.toHaveBeenCalled();
+});
+it('rechecks after successful inspection rather than treating it as permanent approval',async()=>{
+ const f=fixture();f.setExisting('existing');await f.controller.check();f.emit();await tick();expect(f.controller.state.phase).toBe('checked');
+ f.setExisting('existing','source');await f.controller.start();f.emit('idle',{snapshot:true});await tick();
+ expect(f.controller.state.phase).toBe('error');expect(f.host.claim).not.toHaveBeenCalled();expect(f.host.transition).not.toHaveBeenCalled();
+});
+it('cancels an inspection while waiting for idle without making Word requests',async()=>{
+ const f=fixture();await f.controller.check();f.emit('active');await f.controller.stop();
+ expect(f.host.selectedKey).not.toHaveBeenCalled();expect(f.controller.state.phase).toBe('stopped');
+});
+it('replaces the previous checked status synchronously when checking again',async()=>{
+ const f=fixture();await f.controller.check();f.emit();await tick();expect(f.controller.state.phase).toBe('checked');
+ const checking=f.controller.check();expect(f.controller.state.phase).toBe('connecting');await checking;
+ f.emit('idle',{snapshot:true});await tick();expect(f.controller.state.phase).toBe('checked');
+});

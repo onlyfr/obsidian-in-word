@@ -4,16 +4,19 @@ import type {NativeBodyBridge} from '../body/native-bridge';
 export function mountBodyControls(root:HTMLElement,bridge:NativeBodyBridge){
   const start=root.querySelector<HTMLButtonElement>('[data-body-start]')!;
   const stop=root.querySelector<HTMLButtonElement>('[data-body-stop]')!;
+  const check=root.querySelector<HTMLButtonElement>('[data-body-check]')!;
   const status=root.querySelector<HTMLElement>('[data-body-status]')!;
   let disposed=false;
   const render=(state:BodyControlState)=>{
     if(disposed)return;
     root.dataset.state=state.phase;status.textContent=state.message;
-    const inactive=['off','stopped','error'].includes(state.phase);
+    const inactive=['off','stopped','checked','error'].includes(state.phase);
     start.disabled=!inactive;stop.disabled=inactive || state.phase==='stopping';
+    check.disabled=!inactive && state.phase!=='ready';
   };
   const controller=new BodyEditController(bridge,render);
   start.onclick=()=>{void controller.start();};stop.onclick=()=>{void controller.stop();};
+  check.onclick=()=>{void controller.check();};
   root.hidden=false;render(controller.state);
-  return {controller,async dispose(){disposed=true;start.onclick=null;stop.onclick=null;root.hidden=true;await controller.dispose();}};
+  return {controller,async dispose(){disposed=true;start.onclick=null;stop.onclick=null;check.onclick=null;root.hidden=true;await controller.dispose();}};
 }

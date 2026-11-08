@@ -20,6 +20,7 @@ export function bindBodyControls(root:HTMLElement){
       root.querySelector<HTMLElement>('[data-body-status]')!.textContent='본문 편집 준비 화면을 불러오지 못했습니다. 작업창을 다시 열어주세요.';
       root.querySelector<HTMLButtonElement>('[data-body-start]')!.disabled=true;
       root.querySelector<HTMLButtonElement>('[data-body-stop]')!.disabled=true;
+      root.querySelector<HTMLButtonElement>('[data-body-check]')!.disabled=true;
     });
   });
   const dispose=()=>{stop();generation++;void current?.dispose();root.hidden=true;};
