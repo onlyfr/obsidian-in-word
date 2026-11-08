@@ -1,6 +1,6 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 const tick=()=>new Promise(r=>setTimeout(r,0));
-beforeEach(()=>{vi.resetModules();document.body.innerHTML='<section id="body-controls" hidden><button data-body-start>시작</button><button data-body-stop>중지</button><p data-body-status></p></section>';});
+beforeEach(()=>{vi.resetModules();document.body.innerHTML='<section id="body-controls" hidden><button data-body-check>상태 확인</button><button data-body-start>시작</button><button data-body-stop>중지</button><p data-body-status></p></section>';});
 afterEach(()=>vi.doUnmock('../src/taskpane/body-controls'));
 it('does not load controls or open any connection without explicit injection',async()=>{
  const mount=vi.fn();vi.doMock('../src/taskpane/body-controls',()=>({mountBodyControls:mount}));

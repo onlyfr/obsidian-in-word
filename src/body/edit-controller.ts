@@ -1,19 +1,21 @@
 import {NativeImeConnection,type NativeImeSignal} from './native-ime';
 import {NativeBodyOwnership,type NativeOwnershipHost} from './native-ownership';
 import type {NativeBodyBridge,NativeBodyLink} from './native-bridge';
+import {inspectBodyReadiness,type BodyReadHost} from './readiness';
 
 type Input=NativeImeSignal['state'];
-export type BodyControlPhase='off'|'connecting'|'waiting'|'registering'|'ready'|'stopping'|'stopped'|'error';
+export type BodyControlPhase='off'|'connecting'|'waiting'|'registering'|'checking'|'checked'|'ready'|'stopping'|'stopped'|'error';
 export interface BodyControlState {phase:BodyControlPhase;input:Input;key?:string;message:string;}
 class Cancelled extends Error {}
 interface Run {
   cancelled:boolean;input:Input;key?:string;failure?:string;mutationSubmitted:boolean;
+  operation:'start'|'check';result?:string;
   link?:NativeBodyLink;ime?:NativeImeConnection;unsubscribe?:()=>void;
   setup?:Promise<void>;enrollment?:Promise<void>;cleanup?:Promise<void>;
   waiters:Set<{resolve:()=>void;reject:(error:unknown)=>void}>;
 }
 
-/** Stage 1: explicit enrollment and lifecycle only. No source/render writes or recovery commands. */
+/** Explicit preparation and read-only inspection. No automatic source/render writes or recovery commands. */
 export class BodyEditController {
   private current:Run|null=null;
   private disposed=false;
@@ -28,8 +30,14 @@ export class BodyEditController {
   private alive(run:Run):boolean{return this.current===run && !run.cancelled;}
   private assertAlive(run:Run){if(!this.alive(run))throw new Cancelled();}
   start():Promise<void>{
+    return this.begin('start');
+  }
+  check():Promise<void>{
+    return this.current?this.stop().then(()=>this.begin('check')):this.begin('check');
+  }
+  private begin(operation:'start'|'check'):Promise<void>{
     if(this.disposed || this.current)return Promise.resolve();
-    const run:Run={cancelled:false,input:'unknown',mutationSubmitted:false,waiters:new Set()};
+    const run:Run={cancelled:false,input:'unknown',mutationSubmitted:false,waiters:new Set(),operation};
     this.current=run;this.publish('connecting','본문 연결을 확인하고 있습니다.',run);
     run.setup=Promise.resolve().then(()=>this.open(run)).catch(error=>this.fail(run,error));
     return run.setup;
@@ -54,8 +62,8 @@ export class BodyEditController {
       for(const waiter of run.waiters)waiter.resolve();run.waiters.clear();
       if(run.key)this.publish('ready','문단 등록이 완료됐습니다. 본문 편집 준비 상태입니다.',run);
       else if(!run.enrollment){
-        this.publish('registering','선택한 문단을 확인하고 등록합니다.',run);
-        run.enrollment=Promise.resolve().then(()=>this.enroll(run)).catch(error=>{if(!(error instanceof Cancelled))this.fail(run,error,true);});
+        this.publish('checking','문서와 전환 기록을 읽어 상태를 확인합니다.',run);
+        run.enrollment=Promise.resolve().then(()=>run.operation==='check'?this.inspect(run):this.enroll(run)).catch(error=>{if(!(error instanceof Cancelled))this.fail(run,error,true);});
       }
     }else this.publish('waiting',input==='active'?'글자 입력이 끝날 때까지 기다립니다.':'Word 본문에서 등록할 일반 문단을 선택하세요.',run);
   }
@@ -66,13 +74,15 @@ export class BodyEditController {
       await new Promise<void>((resolve,reject)=>run.waiters.add({resolve,reject}));
     }
   }
-  private async verifyRendered(run:Run,key:string){
-    const link=run.link!;
-    const block=await this.idle(run,()=>link.host.read(key));this.assertAlive(run);
-    if(!block || block.key!==key || block.epoch!==link.epoch || block.mode!=='rendered')throw new Error('문단 상태를 확인할 수 없습니다. Word의 Ctrl+Z / Ctrl+Y로 문서를 확인하세요.');
-    const records=await this.idle(run,()=>link.host.journals());this.assertAlive(run);
-    const record=records.find(item=>item.key===key);
-    if(record && (record.phase!=='closed' || record.nativeStage))throw new Error('중단된 전환 기록이 있습니다. Word의 Ctrl+Z / Ctrl+Y로 문서를 확인하세요.');
+  private reader(run:Run):BodyReadHost{
+    const host=run.link!.host;
+    return {selectedKey:()=>this.idle(run,()=>host.selectedKey()),read:key=>this.idle(run,()=>host.read(key)),journals:()=>this.idle(run,()=>host.journals())};
+  }
+  private async inspect(run:Run){
+    const result=await inspectBodyReadiness(this.reader(run),run.link!.epoch);this.assertAlive(run);
+    run.key=result.key??undefined;
+    run.result=result.key?'상태 확인 완료: 선택한 등록 문단과 전환 기록이 정상입니다. 시작하려면 시작을 누르세요.':'상태 확인 완료: 선택한 영역은 등록되지 않았습니다. 문서를 변경하지 않았습니다.';
+    void this.finish(run);
   }
   private async enroll(run:Run){
     const host=run.link!.host;
@@ -85,10 +95,10 @@ export class BodyEditController {
         catch(cause){throw new Error('문단 등록 결과를 확인할 수 없습니다. 자동으로 다시 등록하지 않습니다.',{cause});}
       }),
     };
-    const selected=await gated.selectedKey();this.assertAlive(run);
-    if(selected)await this.verifyRendered(run,selected);
+    await inspectBodyReadiness(this.reader(run),run.link!.epoch);this.assertAlive(run);
+    this.publish('registering','선택한 문단을 확인하고 등록합니다.',run);
     const key=await new NativeBodyOwnership(gated).claimSelected();this.assertAlive(run);
-    await this.verifyRendered(run,key);this.assertAlive(run);
+    await inspectBodyReadiness(this.reader(run),run.link!.epoch,key);this.assertAlive(run);
     run.key=key;
     this.publish(run.input==='idle'?'ready':'waiting',run.input==='idle'?'문단 등록이 완료됐습니다. 본문 편집 준비 상태입니다.':'입력 상태를 확인할 때까지 기다립니다.',run);
   }
@@ -117,7 +127,7 @@ export class BodyEditController {
       try{await run.link?.close();}catch(error){run.failure??=(error as Error).message;}
       if(this.current===run){
         this.current=null;
-        this.publish(run.failure?'error':'stopped',run.failure??'본문 편집 준비를 중지했습니다.',run);
+        this.publish(run.failure?'error':run.result?'checked':'stopped',run.failure??run.result??'본문 편집 준비를 중지했습니다.',run);
       }
     });
     return run.cleanup;
