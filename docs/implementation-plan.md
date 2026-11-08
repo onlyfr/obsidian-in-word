@@ -43,7 +43,7 @@
 - [x] 측정 범위·결과·제약 기록: `docs/testing/2026-11-07-math-optimization.md`. SVG 생성 중앙값 330→262ms, 다운로드 크기는 유지.
 - [x] main 반영: https://github.com/onlyfr/obsidian-in-word/pull/39
 
-## 2. 실패 / Undo 후 상태 확인 — 검증 완료, main 반영 대기
+## 2. 실패 / Undo 후 상태 확인 — 완료 (PR #40)
 
 - [x] 실패하면 즉시 중지하고 Word Ctrl+Z / Ctrl+Y 안내.
 - [x] 결과가 불확실한 요청을 재전송하지 않음.
@@ -51,7 +51,7 @@
 - [x] Undo 뒤 source 태그·중단 기록이 남으면 자동으로 덮거나 본문을 재작성하지 않음. 다른 문단에서 시작해도 기록 검사 전에는 새 등록하지 않음. 단위 테스트로 확인.
 - [x] 상태 확인이 Word Redo 기록을 지우지 않는지 검증. 실제 Word에서 정상 편집 Undo→확인→Redo와 부분 실패 Undo 2회→거부→Redo 2회 통과.
 - [x] 단위 543건·타입체크·빌드. 상세: `docs/testing/2026-11-08-body-readonly-check.md`.
-- [ ] 커밋·푸시·main 반영.
+- [x] 커밋·푸시·main 반영: https://github.com/onlyfr/obsidian-in-word/pull/40
 
 자동 전환을 켜야만 검증할 수 있는 부분은 별도 시험 환경에서 확인하며, 이 단계를 이유로 사용자용 자동 전환을 먼저 연결하지 않는다.
 
