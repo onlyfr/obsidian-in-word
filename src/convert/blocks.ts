@@ -141,7 +141,7 @@ export function toDataUri(b64: string): string {
 
 /** Ids of all `<!-- word:obj id=... -->` placeholders in a markdown string. */
 export function placeholderIds(markdown: string): Set<string> {
-  return new Set(Array.from(markdown.matchAll(/<!-- word:obj id=([0-9a-f]{8}) kind=[a-z]+ -->/g), (m) => m[1]));
+  return new Set(Array.from(markdown.matchAll(/<!-- word:(?:obj id=([0-9a-f]{8}) kind=[a-z]+|img id=([0-9a-f]{8})) -->/g), (m) => m[1]??m[2]));
 }
 
 export const PLACEHOLDER_SPLIT_RE = /^<!-- word:obj id=([0-9a-f]{8}) kind=([a-z]+) -->[ \t]*$/m;
@@ -240,8 +240,36 @@ export function protectOpaque(
   report?: FloatReport,
   /** gz OOXML packages of paragraphs with unconvertible equations (indexed by the `data-owb-eq` attribute). */
   eqPackages: { pkg: string; count: number }[] = [],
+  inlinePictures = false,
 ): string {
   const doc = new DOMParser().parseFromString(`<body>${bodyHtml}</body>`, "text/html");
+  doc.querySelectorAll('[data-owb-picture-ord]').forEach(el=>el.removeAttribute('data-owb-picture-ord'));
+  if(inlinePictures && images){
+    const pictures=Array.from(doc.body.querySelectorAll('img')).filter(img=>!isFloatingImg(img));
+    if(pictures.length===images.length){
+      const consumed=new Set<number>();
+      const kinds=new WeakMap<Element,string|null>();
+      pictures.forEach((img,index)=>{
+        if(!images![index])return;
+        let block:Element=img;
+        while(block.parentElement && block.parentElement!==doc.body && !/^WordSection/i.test(block.parentElement.className))block=block.parentElement;
+        if(!kinds.has(block))kinds.set(block,classifyOpaque(block));
+        const kind=kinds.get(block);
+        if(kind && kind!=='image')return;
+        // Tables and other opaque structures keep their original block policy. Never adopt a math marker as a cat.
+        if(img.closest('table,svg,object,[data-owb-eq]') || /^owb:math:/.test(img.getAttribute('alt')??'') || isFloatingImg(img))return;
+        const copy=img.cloneNode(true) as Element;
+        copy.removeAttribute('id'); // Word renumbers presentation IDs when the same picture is reinserted.
+        copy.setAttribute('src',toDataUri(images![index]));
+        const html=copy.outerHTML,id=hashId('inline-image:'+stableHtml(html));
+        const existing=sidecar.get(id);
+        if(existing && (existing.kind!=='image' || existing.inline!==true || existing.html!==html))throw new Error('그림 식별자가 기존 원본과 충돌합니다. 적용하지 말고 문서를 확인하세요.');
+        sidecar.set(id,{kind:'image',html,inline:true});
+        img.replaceWith(doc.createTextNode(`OWBINLINEIMG${id}END`));consumed.add(index);
+      });
+      images=images.filter((_,index)=>!consumed.has(index));
+    }
+  }
   // Floating pictures are not part of Office.js inlinePictures, so only inline ones are paired with image bytes.
   const isFloating = isFloatingImg;
   const inlineCount = Array.from(doc.body.querySelectorAll("img")).filter((i) => !isFloating(i)).length;
@@ -268,10 +296,14 @@ export function protectOpaque(
         continue;
       }
       const eqIdx = el.getAttribute(EQ_ATTR) ?? el.querySelector(`[${EQ_ATTR}]`)?.getAttribute(EQ_ATTR);
+      const mathCount=Number(el.getAttribute('data-owb-preserved-math')??0);
+      el.removeAttribute('data-owb-preserved-math');
       const stable = stableHtml(el.outerHTML)
         .replace(new RegExp(`\\s${EQ_ATTR}="\\d+"`, "g"), "")
         .replace(/OWBEQ\d+END/g, "OWBEQ");
-      const id = hashId(kind === "equation" ? stable + (eqPackages[Number(eqIdx)]?.pkg ?? "") : stable);
+      let id = hashId(kind === "equation" ? stable + (eqPackages[Number(eqIdx)]?.pkg ?? "") : stable);
+      let unavailable=el.hasAttribute('data-owb-unavailable') || !!el.querySelector('[data-owb-unavailable]');
+      el.removeAttribute('data-owb-unavailable');el.querySelectorAll('[data-owb-unavailable]').forEach(node=>node.removeAttribute('data-owb-unavailable'));
       if (images !== undefined) {
         const inner = el.tagName === "IMG" ? [el] : Array.from(el.querySelectorAll("img"));
         for (const img of inner) {
@@ -279,9 +311,11 @@ export function protectOpaque(
           const bytes = embed && !isFloating(img) ? images[imgIndex++] : undefined;
           img.setAttribute("src", bytes ? toDataUri(bytes) : BLANK_PNG);
           if (!bytes) img.setAttribute("alt", "picture not preserved");
+          if(!bytes && !isFloating(img))unavailable=true;
         }
       }
       const html = el.outerHTML.replace(new RegExp(`\\s${EQ_ATTR}="\\d+"`, "g"), "");
+      if(unavailable && kind!=='float' && kind!=='equation')id=hashId(stable+':unavailable');
       if (kind === "equation") {
         const pk = eqPackages[Number(eqIdx)];
         sidecar.set(id, pk ? { kind, html, ooxml: pk.pkg, count: pk.count } : { kind, html });
@@ -291,8 +325,8 @@ export function protectOpaque(
           report.total++;
           if (ooxml) report.preserved++;
         }
-        sidecar.set(id, ooxml ? { kind, html, ooxml } : { kind, html });
-      } else sidecar.set(id, { kind, html });
+        sidecar.set(id, ooxml ? { kind, html, ooxml,...(mathCount?{count:mathCount}:{}) } : { kind, html });
+      } else sidecar.set(id, { kind, html,...(unavailable?{unavailable:true}:{}) });
       const p = doc.createElement("p");
       p.textContent = `OWBOBJ${id}K${kind}END`;
       el.replaceWith(p);
@@ -306,6 +340,7 @@ export function protectOpaque(
 /** Turn the tokens that survived HTML->markdown conversion into visible placeholder comments. */
 export function tokensToPlaceholders(md: string): string {
   return md
+    .replace(/OWBINLINEIMG([0-9a-f]{8})END/g,(_m,id:string)=>`<!-- word:img id=${id} -->`)
     .replace(TOKEN_RE, (_m, id: string, kind: string) => `<!-- word:obj id=${id} kind=${kind} -->`)
     .replace(STYLE_TOKEN_RE, (_m, cls: string, name: string) => styleMarker(fromHex(cls), fromHex(name)));
 }

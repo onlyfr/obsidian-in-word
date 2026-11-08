@@ -77,7 +77,7 @@ describe('MathJax raster output',()=>{
   expect(result.baseline).toBeCloseTo(17.6666667);expect(result.scale).toBe(3);
   const svg=new DOMParser().parseFromString(decodeURIComponent(sources[0].split(',').slice(1).join(',')),'application/xml').documentElement;
   expect(svg.getAttribute('width')).toBe('36');expect(svg.getAttribute('height')).toBe('24');
-  expect(svg.getAttribute('color')).toBe('#000');expect(svg.querySelector('foreignObject')).toBeNull();
+  expect(svg.getAttribute('color')).toBe('#000000');expect(svg.querySelector('foreignObject')).toBeNull();
   expect(renderMathSvg).toHaveBeenCalledWith('x',true);
  });
  it.each(['0 0 0 20','0 0 NaN 20','0 0 1000000 1000'])('refuses empty, invalid or excessive SVG geometry: %s',async viewBox=>{

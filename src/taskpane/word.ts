@@ -1,5 +1,6 @@
 import { leftoverChecks } from "./markers";
 import type { MathOutputMode } from "../convert/mathimg";
+import type {MathAppearance} from '../convert/math-appearance';
 import { trailingBlankParagraphs } from "../convert/trailing-blanks";
 import { hashId, normText, placeholderIds, type FloatBlock, type FloatReport } from "../convert/blocks";
 import {
@@ -149,7 +150,13 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     await context.sync();
     // getHtml renders equations as bare images; their OMML comes from the OOXML (paired with the images by order).
     const scan = scanOoxml(selOoxml.value);
-    for (const it of scan.items) if (it.kind === "eq" && it.paraXml) it.paraPkg = await gz(wrapPackage(it.paraXml));
+    const paragraphPackages=new Map<string,Promise<string>>();
+    await Promise.all(scan.items.map(async it=>{
+      if(it.kind!=='eq' || !it.paraXml)return;
+      let pkg=paragraphPackages.get(it.paraXml);
+      if(!pkg){pkg=gz(wrapPackage(it.paraXml));paragraphPackages.set(it.paraXml,pkg);}
+      it.paraPkg=await pkg;
+    }));
     // getHtml references images by a temp file that is gone later; keep the real bytes in the sidecar instead.
     const pictures = selection.inlinePictures.items.map((p) => p.getBase64ImageSrc());
     // Empty text can still be a picture-only paragraph. Load just the empty tail's picture collections in the same
@@ -170,7 +177,23 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     const report: FloatReport = { total: 0, preserved: 0 };
     const mathReport: MathReport = { total: 0, latex: 0, opaque: 0, unpaired: 0 };
     const tableReport: TableReport = { total: 0, simple: 0, opaque: 0, unpaired: 0, reasons: {} };
-    const tableCaps = await Promise.all(scanTables(selOoxml.value).map(async (raw) => ({ raw, gz: await gz(raw), rels: tableRels(raw, selOoxml.value) })));
+    const tableRaw=scanTables(selOoxml.value);
+    const mathCounts=tableRaw.map(raw=>{const found=scanOoxml(raw);return found.equations+found.mathImages;});
+    let tablePackages:(OfficeExtension.ClientResult<string>|undefined)[]=[];
+    if(mathCounts.some(Boolean)){
+      selection.tables.load('items/nestingLevel');await context.sync();
+      const tops=selection.tables.items.filter(table=>table.nestingLevel===1);
+      if(tops.length===tableRaw.length){
+        const bounds=tops.map(table=>({start:selection.getRange('Start').compareLocationWith(table.getRange('Whole').getRange('Start')),
+          end:selection.getRange('End').compareLocationWith(table.getRange('Whole').getRange('End'))}));
+        await context.sync();
+        // A cell/picture selection must never acquire and later insert its entire surrounding table.
+        tablePackages=tops.map((table,index)=>mathCounts[index] && ['Before','Equal'].includes(bounds[index].start.value) && ['After','Equal'].includes(bounds[index].end.value)?table.getRange('Whole').getOoxml():undefined);
+        await context.sync();
+      }
+    }
+    const tableCaps = await Promise.all(tableRaw.map(async(raw,index) => ({raw,gz:await gz(raw),rels:tableRels(raw,selOoxml.value),
+      ...(tablePackages[index]?.value?{pkg:await gz(tablePackages[index]!.value),mathCount:mathCounts[index]}:{})})));
     const markdown = htmlToMarkdown(
       html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport,
       trailingBlankParagraphs(trailing.reverse().map(p => ({ text: p.text, tableNestingLevel: p.tableNestingLevel, hasInlinePictures: p.inlinePictures.items.length > 0 }))),
@@ -186,6 +209,7 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     if (mathReport.total)
       notes.push(`수식 ${mathReport.latex}/${mathReport.total}개 LaTeX로 표시` + (mathReport.opaque ? `, ${mathReport.opaque}개는 원본 보존` : ""));
     if (mathReport.images) notes.push(`수식 그림 ${mathReport.images}개를 LaTeX로 표시`);
+    if(mathReport.preserved)notes.push(`표·보존 개체 안 수식 ${mathReport.preserved}개는 개체 전체 원본으로 보존됩니다`);
     if (tableReport.total)
       notes.push(
         `표 ${tableReport.simple}/${tableReport.total}개 마크다운 표로 표시` +
@@ -218,7 +242,7 @@ export async function replaceSelectionWithMarkdown(
   markdown: string,
   /** Asks the user (true = go on) when the selection is not the region that was last loaded/applied. */
   confirm?: (message: string) => Promise<boolean>,
-  options: { mathOutput?: MathOutputMode } = {},
+  options: { mathOutput?: MathOutputMode;mathAppearance?:MathAppearance } = {},
 ): Promise<ApplyResult> {
   return Word.run(async (context) => {
     // A collapsed selection (just a cursor) cannot be read (getHtml throws GeneralException), and replacing it would
@@ -255,7 +279,7 @@ export async function replaceSelectionWithMarkdown(
     // Safety net: never silently destroy a floating object.
     if (lost.length)
       throw new Error(
-        `부동 개체 ${lost.length}개의 원본을 복원할 수 없어 적용을 중단했습니다. '선택 영역 → 마크다운'으로 다시 불러오세요`,
+        `Word 개체 ${lost.length}개의 원본을 복원할 수 없어 적용을 중단했습니다. '선택 영역 → 마크다운'으로 다시 불러오세요`,
       );
     const current = context.document.getSelection().getHtml();
     const currentOoxml = context.document.getSelection().getOoxml();
@@ -289,7 +313,7 @@ export async function replaceSelectionWithMarkdown(
     let pictures = new Map<string, { body: string; rels: string; parts: string }>();
     const mathNotes: string[] = [];
     if (equations.some((q) => q.img) || (options.mathOutput === "images" && equations.length)) {
-      const plan = await (await import("../convert/mathimg")).applyMathImages(html0, equations, sidecar, undefined, options.mathOutput);
+      const plan = await (await import("../convert/mathimg")).applyMathImages(html0, equations, sidecar, undefined, options.mathOutput,options.mathAppearance);
       ({ html, active, pictures } = plan);
       mathNotes.push(...plan.notes);
     }
@@ -334,6 +358,10 @@ export async function replaceSelectionWithMarkdown(
         const idx = paras.findIndex((p) => p.text.trim() === f.marker);
         if (idx < 0) throw new Error(`부동 개체 위치를 찾을 수 없습니다 (${f.marker})`);
         ops.push(() => paras[idx].insertOoxml(ooxml[n], Word.InsertLocation.replace));
+        if(f.table){
+          const next=paras[idx+1];
+          if(next && !/^OWB(?:TBL|EQ|FLOAT)\d/.test(next.text.trim()))ops.push(()=>next.getPrevious().delete());
+        }
       });
       // Tables: each replaces its marker paragraph (the original table, or one rebuilt from the markdown).
       tables.forEach((t) => {

@@ -2,6 +2,12 @@
 export interface SidecarEntry {
   kind: string;
   html: string;
+  /** Ordinary inline image, referenced by <!-- word:img id=... --> rather than hiding its whole paragraph. */
+  inline?: boolean;
+  /** Original bytes were not captured reliably. Applying this entry must refuse rather than insert a blank. */
+  unavailable?: boolean;
+  /** Image renderer size/colour profile; absent means the original 11pt/black policy. */
+  renderProfile?:string;
   /** Lossless OOXML of the block (floating objects), possibly compressed by the caller. Used instead of `html`. */
   ooxml?: string;
   /** kind "math": the equation's LaTeX and the original OMML it was read from (restored verbatim if unchanged). */
@@ -133,8 +139,16 @@ export function sidecarToXml(sidecar: Sidecar): string {
 
 export function sidecarFromXml(xml: string, into: Sidecar = new MemorySidecar()): Sidecar {
   const m = /<sidecar\b[^>]*>([\s\S]*?)<\/sidecar>/.exec(xml);
-  if (!m) return into;
+  if (!m){if(xml.includes(SIDECAR_NAMESPACE))throw new Error('Word 원본 보존 데이터의 루트가 올바르지 않습니다');return into;}
   const data = JSON.parse(decodeURIComponent(m[1])) as Record<string, SidecarEntry>;
-  for (const [id, entry] of Object.entries(data)) into.set(id, entry);
+  if(!data || typeof data!=='object' || Array.isArray(data))throw new Error('Word 원본 보존 데이터 형식이 올바르지 않습니다');
+  const entries=Object.entries(data);
+  for(const [id,entry] of entries){
+    if(!/^[0-9a-f]{8}$/.test(id) || !entry || typeof entry!=='object' || typeof entry.kind!=='string' || typeof entry.html!=='string')throw new Error('Word 원본 보존 항목이 손상되었습니다');
+    if((entry.latex!==undefined && typeof entry.latex!=='string') || (entry.display!==undefined && typeof entry.display!=='boolean') || (entry.inline!==undefined && typeof entry.inline!=='boolean') || (entry.renderProfile!==undefined && typeof entry.renderProfile!=='string') || (entry.unavailable!==undefined && typeof entry.unavailable!=='boolean'))throw new Error('Word 개체 식별 정보가 손상되었습니다');
+    const old=into.get(id);
+    if(old && (old.kind!==entry.kind || old.latex!==entry.latex || !!old.display!==!!entry.display || !!old.inline!==!!entry.inline || (old.renderProfile??'')!==(entry.renderProfile??'')))throw new Error(`Word 원본 식별자가 충돌합니다 (${id}). 문서를 확인하세요`);
+  }
+  for (const [id, entry] of entries) into.set(id, entry);
   return into;
 }

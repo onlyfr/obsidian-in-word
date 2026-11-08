@@ -14,6 +14,7 @@ import {
   type FloatReport,
 } from "./blocks";
 import { MemorySidecar, type Sidecar } from "./sidecar";
+import {parseMathImgAlt,normalizedMathSource} from './math-marker';
 import {
   EQ_TOKEN_RE,
   captureMath,
@@ -37,9 +38,24 @@ export function preprocessCallouts(src: string): string {
 }
 
 
-interface StyleEnv {
+interface StyleEnv extends Record<string,unknown> {
   styles?: Map<string, string>;
+  images?: {sidecar:Sidecar;missing:string[]};
 }
+
+// Inline references keep ordinary images from swallowing math and text in their surrounding paragraph/list.
+md.inline.ruler.before('image','word_inline_image',(state,silent)=>{
+  const match=/^<!-- word:img id=([0-9a-f]{8}) -->/.exec(state.src.slice(state.pos));
+  if(!match)return false;
+  if(!silent){const token=state.push('word_inline_image','',0);token.meta={id:match[1]};}
+  state.pos+=match[0].length;return true;
+});
+md.renderer.rules.word_inline_image=(tokens,index,_options,env)=>{
+  const id=tokens[index].meta!.id as string,images=(env as StyleEnv).images,entry=images?.sidecar.get(id);
+  if(!images)return md.utils.escapeHtml(`<!-- word:img id=${id} -->`);
+  if(entry?.kind==='image' && entry.inline===true && !entry.unavailable)return entry.html;
+  images?.missing.push(id);return `[missing Word image ${id}]`;
+};
 
 // `<!-- word:style class=a3 name=... -->` on its own line applies a Word paragraph style to the next paragraph.
 md.block.ruler.before("paragraph", "word_style", (state, startLine, _endLine, silent) => {
@@ -91,8 +107,8 @@ md.core.ruler.after("block", "word_style_apply", (state) => {
 const escapeCss = (v: string) => v.replace(/["\\\n]/g, "");
 
 /** Obsidian-flavored markdown -> HTML suitable for Word's insertHtml. */
-export function markdownToHtml(src: string): string {
-  const env: Record<string, unknown> = {};
+export function markdownToHtml(src: string,images?:StyleEnv['images']): string {
+  const env: Record<PropertyKey,unknown> = {images};
   const body = md.render(preprocessCallouts(src), env);
   const used = (env as StyleEnv).styles;
   if (!used?.size) return body;
@@ -108,7 +124,7 @@ const td = new TurndownService({ headingStyle: "atx", bulletListMarker: "-", cod
 td.addRule("wordStrike", {filter: node => node.nodeName === "S" || node.nodeName === "STRIKE", replacement: content => content ? `~~${content}~~` : ""});
 // Escape literal tildes as text, before semantic strike delimiters are added by replacement rules.
 const escapeText = td.escape.bind(td);
-td.escape = text => escapeText(text).replace(/~/g, "\\~");
+td.escape = text => escapeText(text).replace(/~/g, "\\~").replace(/<!-- word:/g,'\\<!-- word:');
 
 /** Strip Word-specific noise from getHtml() output and keep only the body. */
 /**
@@ -169,7 +185,7 @@ export function htmlToMarkdown(
       tableCaps,
       sidecar,
       tableBlocks,
-      tableReport,
+      tableReport,mathReport,pics,
     ),
     officeTrailingBlanks,
   );
@@ -184,6 +200,7 @@ export function htmlToMarkdown(
         floatOoxml,
         report,
         eqPackages,
+        true,
       ),
     ),
   );
@@ -271,6 +288,9 @@ export interface TableCapture {
   gz: string;
   /** `<Relationship>` markup for the hyperlinks `raw` refers to (see tableRels). */
   rels?: string;
+  /** Whole table package with its own media/styles for a math-containing opaque table. */
+  pkg?:string;
+  mathCount?:number;
 }
 
 export interface TableReport {
@@ -303,6 +323,8 @@ function convertSimpleTables(
   sidecar: Sidecar,
   blocks: string[],
   report?: TableReport,
+  mathReport?:MathReport,
+  pics?:{total:number;math:Set<number>},
 ): string {
   if (!caps || !caps.length) {
     if (report) {
@@ -331,6 +353,15 @@ function convertSimpleTables(
     report.reasons[reason] = (report.reasons[reason] ?? 0) + 1;
   };
   tops.forEach((el, i) => {
+    const cap=caps[i];
+    if(cap.pkg && !hasFloating(el)){
+      const id=tableId(cap.raw);
+      sidecar.set(id,{kind:'table',html:'<table></table>',ooxml:cap.pkg,count:cap.mathCount??0});
+      for(const img of el.querySelectorAll('[data-owb-picture-ord]'))pics?.math.add(Number(img.getAttribute('data-owb-picture-ord')));
+      if(mathReport){mathReport.unpaired=Math.max(0,mathReport.unpaired-(cap.mathCount??0));mathReport.preserved=(mathReport.preserved??0)+(cap.mathCount??0);}
+      const p=doc.createElement('p');p.textContent=`OWBOBJ${id}KtableEND`;el.replaceWith(p);
+      return note('math/object original preserved');
+    }
     if (!direct(el)) return note("inside a list or quote");
     if (hasFloating(el)) return note("floating object");
     const a = analyzeHtmlTable(el, cellMarkdown);
@@ -358,6 +389,8 @@ export interface MathReport {
   unpaired: number;
   /** LaTeX-as-picture pairs (`owb:math:` alt marker) shown as LaTeX again; not part of `total`. */
   images?: number;
+  /** Math kept inside a lossless opaque table/object package. */
+  preserved?:number;
 }
 
 interface MathToken {
@@ -383,12 +416,20 @@ function replaceEquationImages(
   const eqCount = caps?.filter((c) => c.kind === "eq").length ?? 0;
   const miCount = caps?.filter((c) => c.kind === "mathimg").length ?? 0;
   if (report) report.total += eqCount;
-  if (!caps || !(eqCount + miCount)) return html;
+  if (!caps || (!(eqCount + miCount) && !html.includes('owb:math:'))) return html;
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
   const imgs = Array.from(doc.body.querySelectorAll("img")).filter((i) => !isFloatingImg(i));
   if (imgs.length !== caps.length) {
     if (report) report.unpaired += eqCount + miCount;
     return html;
+  }
+  if(imgs.some((img,index)=>{
+    const marker=parseMathImgAlt(img.getAttribute('alt')??''),cap=caps[index];
+    return marker && (cap.kind!=='mathimg' || cap.id!==marker.id || cap.display!==marker.display || (marker.latex!==undefined && cap.kind==='mathimg' && cap.latex!==undefined && normalizedMathSource(marker.latex)!==normalizedMathSource(cap.latex)));
+  })){
+    if(report)report.unpaired+=Math.max(1,eqCount+miCount);
+    imgs.forEach(img=>img.setAttribute('data-owb-unavailable','1'));
+    return doc.body.innerHTML;
   }
   const perPara = new Map<string, number>();
   for (const c of caps) if (c.kind === "eq") perPara.set(c.paraXml, (perPara.get(c.paraXml) ?? 0) + 1);
@@ -397,7 +438,15 @@ function replaceEquationImages(
   imgs.forEach((img, i) => {
     const cap = caps[i];
     if (cap.kind !== "eq") ord++;
+    if(cap.kind!=='eq')img.setAttribute('data-owb-picture-ord',String(ord));
     if (cap.kind === "pic") return;
+    let outer:Element=img;
+    while(outer.parentElement && outer.parentElement!==doc.body && !/^WordSection/i.test(outer.parentElement.className))outer=outer.parentElement;
+    if(hasFloating(outer)){
+      outer.setAttribute('data-owb-preserved-math',String(Number(outer.getAttribute('data-owb-preserved-math')??0)+1));
+      if(report)report.preserved=(report.preserved??0)+1;
+      return;
+    }
     if (img.closest("table")) {
       // Equations inside tables cannot be restored separately from the (opaque) table: leave them, apply will refuse.
       if (report) report.unpaired++;
@@ -408,6 +457,10 @@ function replaceEquationImages(
     if (cap.kind === "mathimg") {
       // LaTeX shown as a picture: the source comes from the sidecar pair (or, failing that, an untruncated alt text).
       const e = sidecar.get(cap.id);
+      if(e && (e.kind!=='mathimg' || (cap.latex!==undefined && normalizedMathSource(e.latex??'')!==cap.latex) || !!e.display!==cap.display)){
+        if(report)report.unpaired++;
+        return; // Conflicting source/identity is never guessed.
+      }
       const latex = e?.kind === "mathimg" && e.latex ? e.latex : cap.latex;
       const display = e?.kind === "mathimg" ? !!e.display : cap.display;
       if (!latex || /(?<!\\)\$/.test(latex) || (!display && latex.includes("\n"))) {
@@ -472,7 +525,7 @@ export interface RenderResult {
    * Blocks restored losslessly from OOXML, in document order. `html` holds a marker paragraph with exactly this
    * text at the right position; the caller replaces that paragraph with `insertOoxml(ooxml)` after insertHtml.
    */
-  floats: { marker: string; ooxml: string }[];
+  floats: { marker: string; ooxml: string; table?:boolean }[];
   /** Floating objects whose lossless OOXML was not captured: restoring them would silently drop the object. */
   lost: string[];
   /**
@@ -573,17 +626,19 @@ export function renderWithSidecar(
   let html = "";
   for (let i = 0; i < parts.length; i += 3) {
     const noTables = extractTables(expandBlankMarkers(parts[i]), sidecar, tableSources, tables, badTables, tableNotes);
-    const chunk = markdownToHtml(tokenizeMath(noTables, sidecar, usedMath, equations.length, equations));
+    const chunk = markdownToHtml(tokenizeMath(noTables, sidecar, usedMath, equations.length, equations),{sidecar,missing});
     html += chunk;
     collectStyled(chunk, styled);
     const id = parts[i + 1];
     if (id === undefined) continue;
     const entry = sidecar.get(id);
+    if(entry?.unavailable)lost.push(id);
     if (entry?.kind === "equation") opaqueEquations += entry.count ?? 1;
+    else if(entry?.ooxml && entry.count)opaqueEquations+=entry.count;
     if (entry?.kind === "table" || (entry?.kind === "float" && entry.html.startsWith("<table"))) opaqueTables++;
     if (entry?.ooxml) {
       const marker = `OWBFLOAT${floats.length}X${id}`;
-      floats.push({ marker, ooxml: entry.ooxml });
+      floats.push({ marker, ooxml: entry.ooxml,...(entry.kind==='table' || (entry.kind==='float' && entry.html.startsWith('<table'))?{table:true}:{}) });
       html += `<p class="MsoNormal">${marker}</p>`;
     } else if (entry) {
       if (entry.kind === "float" || entry.kind === "equation") lost.push(id);

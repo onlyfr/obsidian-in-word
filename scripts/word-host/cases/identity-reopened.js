@@ -1,0 +1,13 @@
+const must=(condition,message)=>{if(!condition)throw new Error('ASSERT: '+message);};
+await selectAll();
+const first=await word.readSelectionAsMarkdown();
+const spans=source=>equations.findMath(source).map(q=>({latex:q.latex,display:q.display}));
+must(JSON.stringify(spans(first.markdown))===JSON.stringify(identityExpected.whole),'all editable math retained after saved reopen');
+const state=await snapshot();
+for(const name of ['tables','pictures','equations','mathImages'])must(state[name]===identityExpected.before[name],'saved object count '+name);
+const partIds=async()=>Word.run(async c=>{const parts=c.document.customXmlParts.getByNamespace(sidecar.SIDECAR_NAMESPACE);parts.load('items');await c.sync();return parts.items.map(part=>part.id);});
+const before=await partIds();
+const again=await word.readSelectionAsMarkdown();
+must(again.markdown===first.markdown,'repeated whole load keeps identical markdown');
+must(JSON.stringify(await partIds())===JSON.stringify(before),'unchanged repeated load does not rewrite sidecar part');
+return {savedReopen:true,sourceStable:true,objectCountsStable:true,noSidecarRewrite:true};

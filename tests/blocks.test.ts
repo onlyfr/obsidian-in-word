@@ -76,9 +76,9 @@ describe("opaque Word objects", () => {
 describe("sidecar xml", () => {
   it("round-trips arbitrary html", () => {
     const sc = new MemorySidecar();
-    sc.set("aa", { kind: "table", html: '<td>]]> & "quotes" 한글</td>' });
+    sc.set("aaaaaaaa", { kind: "table", html: '<td>]]> & "quotes" 한글</td>' });
     const back = sidecarFromXml(sidecarToXml(sc));
-    expect(back.get("aa")).toEqual(sc.get("aa"));
+    expect(back.get("aaaaaaaa")).toEqual(sc.get("aaaaaaaa"));
   });
 });
 

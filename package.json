@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:word": "python scripts/word-host/run.py",
     "bench:math-svg": "node scripts/bench/math-svg.mjs",
+    "bench:objects": "node scripts/bench/object-scan.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
