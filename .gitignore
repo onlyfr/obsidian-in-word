@@ -5,3 +5,8 @@ test-docs/
 dist-exp/
 native/plugin-downloader/bin/
 native/plugin-downloader/obj/
+native/windows-host/bin/
+native/windows-host/obj/
+scripts/windows-host/bin/
+scripts/windows-host/obj/
+__pycache__/

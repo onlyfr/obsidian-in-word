@@ -71,10 +71,10 @@
           <legend>커뮤니티 플러그인 찾기</legend>
           <button id="community-load" type="button" disabled>공식 목록 불러오기</button>
           <label class="option-row" for="community-search">검색<input id="community-search" type="search" placeholder="이름, 설명, 제작자" disabled /></label>
-          <p class="option-help">공식 Obsidian 목록은 바로 검색할 수 있습니다. 다운로드하려면 아래 Windows 도우미를 연결하세요. GitHub 정식 릴리스를 내려받은 뒤 설치 목록의 ‘켜기’로 적용합니다. Obsidian 전용 API·Node/Electron·보관함 기능은 지원되지 않을 수 있습니다.</p>
+          <p class="option-help">공식 Obsidian 목록은 바로 검색할 수 있습니다. Windows 앱의 작업창에서는 다운로드가 자동 연결됩니다. GitHub 정식 릴리스를 내려받은 뒤 설치 목록의 ‘켜기’로 적용합니다. Obsidian 전용 API·Node/Electron·보관함 기능은 지원되지 않을 수 있습니다.</p>
           <p id="community-status" role="status" aria-live="polite">목록을 불러와 검색할 수 있습니다.</p>
-          <details><summary>다운로드 도우미 연결</summary>
-            <p class="option-help"><a href="./downloads/word-plugin-downloader.zip" download target="_blank" rel="noopener noreferrer">Windows 다운로드 도우미 받기</a> → 압축을 풀고 WordPluginDownloader.exe를 실행하세요. 도우미 창의 연결 주소를 복사해 붙여넣으세요. 도우미를 닫으면 다운로드 연결도 종료됩니다.</p>
+          <details><summary>Windows 앱 / 기존 도우미 연결</summary>
+            <p class="option-help"><a href="./downloads/obsidian-in-word-windows.zip" download target="_blank" rel="noopener noreferrer">Windows 앱 받기</a> → 압축을 풀고 ObsidianInWord.exe를 실행한 뒤 ‘Word 연결 설정’을 누르세요. Word에서 앱의 작업창을 사용하면 연결 주소가 필요 없습니다. 아래 입력은 기존 다운로드 도우미 사용자용입니다.</p>
             <label class="option-row" for="community-connection">연결 주소<input id="community-connection" type="password" autocomplete="off" placeholder="도우미 창에서 복사한 주소" /></label>
             <button id="community-connect" type="button">연결</button><button id="community-disconnect" type="button" disabled>연결 해제</button>
             <p id="community-connection-status" role="status">도우미 미연결 · 목록 검색은 사용할 수 있습니다.</p>
