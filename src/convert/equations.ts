@@ -1,6 +1,7 @@
 import { hashId } from "./blocks";
 import { OMML_PKG_NAMESPACES, latexToOmml, ommlToLatex } from "./math";
 import type { Sidecar } from "./sidecar";
+import {parseMathImgAlt} from './math-marker';
 
 /**
  * Real Word `getHtml` renders every equation as a bare `<img src="~WRS{GUID}.files/imageNNN.gif">` (inline ones in a
@@ -41,9 +42,13 @@ export interface OoxmlScan {
 }
 
 /** `descr="owb:math:<id>[:d][ latex…]"` of a picture's docPr (see mathImgAlt in mathimg.ts). */
-const MATHIMG_ALT_RE = /<wp:docPr\b[^>]*?\bdescr="owb:math:([0-9a-f]{8})(:d)?(?: ([^"]*))?"/;
+const MATHIMG_ALT_RE = /<wp:docPr\b[^>]*?\bdescr=(?:"([^"]*)"|'([^']*)')/;
 const unescapeXml = (v: string) =>
-  v.replace(/&(lt|gt|quot|amp);/g, (_m, e: string) => ({ lt: "<", gt: ">", quot: '"', amp: "&" })[e as "lt"]);
+  v.replace(/&(lt|gt|quot|amp|apos|#x[0-9a-f]+|#\d+);/gi, (match,entity:string)=>{
+    if(entity[0]!=='#')return ({lt:'<',gt:'>',quot:'"',amp:'&',apos:"'"} as Record<string,string>)[entity.toLowerCase()];
+    const code=entity[1].toLowerCase()==='x'?parseInt(entity.slice(2),16):Number(entity.slice(1));
+    return code>0 && code<=0x10ffff?String.fromCodePoint(code):match;
+  });
 
 const TAG_RE =
   /<m:oMathPara[\s>][\s\S]*?<\/m:oMathPara>|<m:oMath[\s>][\s\S]*?<\/m:oMath>|<wp:inline[\s>/]|<wp:anchor[\s>/]|<w:pict[\s>/]|<w:object[\s>/]/g;
@@ -53,21 +58,31 @@ export function scanOoxml(ooxml: string): OoxmlScan {
   let equations = 0;
   let mathImages = 0;
   const bodyStart = ooxml.indexOf("<w:body");
-  const body = bodyStart < 0 ? ooxml : ooxml.slice(bodyStart);
+  const bodyEnd=bodyStart<0?-1:ooxml.indexOf('</w:body>',bodyStart);
+  const body = (bodyStart < 0 ? ooxml : ooxml.slice(bodyStart,bodyEnd<0?undefined:bodyEnd+9))
+    .replace(/<mc:AlternateContent\b[^>]*>[\s\S]*?<\/mc:AlternateContent>/g,block=>/<mc:Choice\b[^>]*>([\s\S]*?)<\/mc:Choice>/.exec(block)?.[1]??block);
+  // Find paragraph bounds once; two lastIndexOf searches per equation were quadratic on common Word markup.
+  const paragraphs:{start:number;end:number}[]=[],stack:number[]=[];
+  for(const tag of body.matchAll(/<w:p(?:\s[^>]*|)>|<\/w:p>/g)){
+    if(tag[0]==='</w:p>'){const index=stack.pop();if(index!==undefined)paragraphs[index].end=tag.index!+tag[0].length;}
+    else{paragraphs.push({start:tag.index!,end:tag[0].endsWith('/>')?tag.index!+tag[0].length:-1});if(!tag[0].endsWith('/>'))stack.push(paragraphs.length-1);}
+  }
+  let paragraph=-1;
   for (const m of body.matchAll(TAG_RE)) {
     const t = m[0];
     if (t.startsWith("<m:oMath")) {
       equations++;
-      const start = Math.max(body.lastIndexOf("<w:p ", m.index), body.lastIndexOf("<w:p>", m.index));
-      const endTag = body.indexOf("</w:p>", m.index);
-      const paraXml = start >= 0 && endTag >= 0 ? body.slice(start, endTag + 6) : "";
+      while(paragraph+1<paragraphs.length && paragraphs[paragraph+1].start<=m.index!)paragraph++;
+      const bounds=paragraphs[paragraph];
+      const paraXml = bounds && bounds.end>m.index! ? body.slice(bounds.start,bounds.end) : '';
       items.push({ kind: "eq", omml: t, display: t.startsWith("<m:oMathPara"), paraXml });
     } else if (t.startsWith("<wp:inline")) {
       const end = body.indexOf("</wp:inline>", m.index);
-      const alt = MATHIMG_ALT_RE.exec(body.slice(m.index, end < 0 ? undefined : end));
+      const descriptor = MATHIMG_ALT_RE.exec(body.slice(m.index, end < 0 ? undefined : end));
+      const alt=descriptor?parseMathImgAlt(unescapeXml(descriptor[1]??descriptor[2])):null;
       if (alt) {
         mathImages++;
-        items.push({ kind: "mathimg", id: alt[1], display: !!alt[2], latex: alt[3] === undefined || alt[3].endsWith("…") ? undefined : unescapeXml(alt[3]) });
+        items.push({ kind: "mathimg",...alt });
       } else items.push({ kind: "pic" });
     } else if (t.startsWith("<w:object")) items.push({ kind: "pic" });
     else if (t.startsWith("<w:pict")) {
@@ -193,7 +208,7 @@ export function findMath(src: string): MathSpan[] {
 
 /** Id of a LaTeX-as-image pair (`kind=mathimg`); the render version is part of it, so a new renderer re-renders. */
 export const MATHIMG_VERSION = 4; // Direct MathJax TeX input; invalidate Temml-intermediate alignment.
-export const mathImgKey = (latex: string, display: boolean) => hashId(`mathimg:v${MATHIMG_VERSION}:${display ? "D" : "I"}:${latex}`);
+export const mathImgKey = (latex: string, display: boolean,profile='') => hashId(`mathimg:v${MATHIMG_VERSION}:${display ? "D" : "I"}:${latex}${profile?'\0'+profile:''}`);
 
 /** Sidecar ids the image rung would use for the math spans of `markdown` (to keep them when pruning). */
 export const mathImgIds = (markdown: string): Set<string> => new Set(findMath(markdown).map((m) => mathImgKey(m.latex, m.display)));

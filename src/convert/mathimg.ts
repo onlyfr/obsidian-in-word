@@ -8,6 +8,8 @@
  */
 import { MATHIMG_VERSION, mathImgKey, type MathResolved } from "./equations";
 import type { Sidecar, SidecarEntry } from "./sidecar";
+import {normalizeMathAppearance,mathAppearanceKey,type MathAppearance} from './math-appearance';
+export {parseMathImgAlt} from './math-marker';
 
 /** Output preference for math spans that have editable LaTeX (opaque Word blocks stay verbatim). */
 export type MathOutputMode = "hybrid" | "images";
@@ -71,11 +73,6 @@ export function mathImgAlt(id: string, latex: string, display: boolean): string 
 }
 
 /** Inverse of {@link mathImgAlt}; `latex` is only set when it was not truncated. null for any other alt text. */
-export function parseMathImgAlt(alt: string): { id: string; display: boolean; latex?: string } | null {
-  const m = /^owb:math:([0-9a-f]{8})(:d)?(?: (.*))?$/s.exec(alt);
-  if (!m) return null;
-  return { id: m[1], display: !!m[2], latex: m[3] === undefined || m[3].endsWith("…") ? undefined : m[3] };
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // ladder: OMML (already decided by tokenizeMath) -> picture -> literal text
@@ -95,16 +92,20 @@ export interface LiteralOutcome {
 }
 export type MathImgOutcome = PictureOutcome | LiteralOutcome;
 
-const validEntry = (e: SidecarEntry | undefined, latex: string, display: boolean): e is SidecarEntry =>
+const validEntry = (e: SidecarEntry | undefined, latex: string, display: boolean,profile:string): e is SidecarEntry =>
   !!e &&
   e.kind === "mathimg" &&
   e.latex === latex &&
   !!e.display === display &&
   e.v === MATHIMG_VERSION &&
+  (e.renderProfile??'')===profile &&
   typeof e.png === "string" &&
   e.png.length > 0 &&
+  e.png.length*3/4<=LIMITS.maxPng &&
   Number.isFinite(e.w) &&
+  e.w!>0 && e.w!<=LIMITS.maxWidth &&
   Number.isFinite(e.h) &&
+  e.h!>0 && e.h!<=LIMITS.maxHeight &&
   Number.isFinite(e.baseline);
 
 function checkResult(r: RasterResult): void {
@@ -134,13 +135,14 @@ export async function resolveMathImages(
   sidecar: Sidecar,
   rasterizer: () => Promise<MathRasterizer>,
   now: () => number = Date.now,
+  profile='',
 ): Promise<MathImgOutcome[]> {
   const out: MathImgOutcome[] = [];
   let r: MathRasterizer | null | undefined;
   const started = now();
   const done = new Map<string, MathImgOutcome>(); // same formula twice => one picture
   for (const item of items) {
-    const id = mathImgKey(item.latex, item.display);
+    const id = mathImgKey(item.latex, item.display,profile);
     const key = id;
     const prev = done.get(key);
     if (prev) {
@@ -149,7 +151,7 @@ export async function resolveMathImages(
     }
     const stored = sidecar.get(id);
     let res: MathImgOutcome;
-    if (validEntry(stored, item.latex, item.display)) res = { kind: "image", item, id, entry: stored, stored: true };
+    if (validEntry(stored, item.latex, item.display,profile)) res = { kind: "image", item, id, entry: stored, stored: true };
     else if (item.latex.length > LIMITS.maxLatex) res = { kind: "literal", item, reason: "too-long" };
     else if (now() - started > LIMITS.budgetMs) res = { kind: "literal", item, reason: "timeout" };
     else {
@@ -175,6 +177,7 @@ export async function resolveMathImages(
             h: rr.h,
             baseline: rr.baseline,
             v: MATHIMG_VERSION,
+            ...(profile?{renderProfile:profile}:{}),
           };
           sidecar.set(id, entry);
           res = { kind: "image", item, id, entry, stored: false };
@@ -322,14 +325,17 @@ export async function applyMathImages(
   html: string,
   equations: MathResolved[],
   sidecar: Sidecar,
-  rasterizer: () => Promise<MathRasterizer> = async () => (await import("./mathraster")).createRasterizer(),
+  rasterizer?: () => Promise<MathRasterizer>,
   mode: MathOutputMode = "hybrid",
+  appearance?:MathAppearance,
 ): Promise<MathImgPlan> {
+  const style=normalizeMathAppearance(mode==='images'?appearance:undefined);
   const planned = mode === "images" ? equations.map(q => ({ ...q, omml: "", img: true })) : equations;
   const outcomes = await resolveMathImages(
     planned.filter((q) => q.img),
     sidecar,
-    rasterizer,
+    rasterizer??(async()=>(await import('./mathraster')).createRasterizer(style)),
+    Date.now,mathAppearanceKey(style),
   );
   return planMathImages(html, planned, outcomes, mode);
 }

@@ -8,6 +8,7 @@ const https =
     : undefined;
 
 export default defineConfig({
+  define:{__APP_BUILD__:JSON.stringify(process.env.GITHUB_SHA?.slice(0,8)??'local')},
   root: "src/taskpane",
   base: "./",
   build: { outDir: "../../dist", emptyOutDir: true },

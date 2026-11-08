@@ -64,7 +64,7 @@ describe("task pane start-up status", () => {
     expect(select.value).toBe('images');
     button.click();await settle();
     expect(apply).toHaveBeenCalledTimes(1);
-    expect(apply.mock.calls[0][2]).toEqual({mathOutput:'images'});
+    expect(apply.mock.calls[0][2]).toEqual({mathOutput:'images',mathAppearance:{sizePt:11,color:'#000000'}});
     expect(button.disabled).toBe(true);expect(select.disabled).toBe(true);
     expect((document.getElementById('editor-wrap') as HTMLInputElement).disabled).toBe(true);
     button.click();(document.getElementById('load') as HTMLButtonElement).click();

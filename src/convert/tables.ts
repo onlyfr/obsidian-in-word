@@ -33,7 +33,8 @@ export const tableMarker = (id: string) => `<!-- word:table id=${id} -->`;
 /** Raw markup of every top-level `<w:tbl>` of `ooxml`, in document order (nested tables stay inside their parent). */
 export function scanTables(ooxml: string): string[] {
   const start = ooxml.indexOf("<w:body");
-  const body = start < 0 ? ooxml : ooxml.slice(start);
+  const end=start<0?-1:ooxml.indexOf('</w:body>',start);
+  const body = start < 0 ? ooxml : ooxml.slice(start,end<0?undefined:end+9);
   const out: string[] = [];
   const re = /<w:tbl[\s>]|<\/w:tbl>/g;
   let depth = 0;

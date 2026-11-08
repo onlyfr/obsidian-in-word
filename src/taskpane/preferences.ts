@@ -1,4 +1,12 @@
 import type { MathOutputMode } from "../convert/mathimg";
+import {normalizeMathAppearance,type MathAppearance} from '../convert/math-appearance';
+const MATH_APPEARANCE_KEY='oiw:math-image-appearance';
+export function loadMathAppearance():MathAppearance{
+  try{return normalizeMathAppearance(JSON.parse(localStorage.getItem(MATH_APPEARANCE_KEY)??'null'));}catch{return normalizeMathAppearance();}
+}
+export function saveMathAppearance(value:MathAppearance):void{
+  try{localStorage.setItem(MATH_APPEARANCE_KEY,JSON.stringify(normalizeMathAppearance(value)));}catch{/* Active options remain usable. */}
+}
 
 const MATH_OUTPUT_KEY = "oiw:math-output";
 const EDITOR_KEY = "oiw:editor-options";

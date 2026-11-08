@@ -118,6 +118,7 @@ def main():
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
     parser.add_argument('--settings-ui-only', action='store_true', help='Run actual task-pane settings tabs/editor/plugin UI checks without keyboard input')
     parser.add_argument('--math-only', action='store_true', help='Run actual raster and math output mode checks without keyboard input')
+    parser.add_argument('--identity-only', action='store_true', help='Run mixed object identity and selection-scope stability checks')
     parser.add_argument('--body-controls-only', action='store_true', help='Run native body preparation start/stop UI checks without keyboard input')
     parser.add_argument('--body-check-only', action='store_true', help='Run read-only native status checks and actual Word Undo/Redo without keys')
     parser.add_argument('--format-only', action='store_true', help='Run only Markdown formatting round-trip regression cases')
@@ -212,6 +213,17 @@ def main():
                 case('js','session-undo-recover','session-undo-recover.js')
                 case('com','session-delete','session-delete.ps1')
                 case('js','session-delete-check','session-delete-check.js')
+            if args.identity_only:
+                case('js','setup','setup.js')
+                identity=case('js','object-identity','object-identity.js')['value']
+                case('com','identity-reopen','session-reopen.ps1')
+                reopened=command(run,'js','identity-reopened','const identityExpected='+json.dumps(identity,ensure_ascii=True)+';'+(SCRIPTS/'cases'/'identity-reopened.js').read_text(encoding='utf-8'),worker=word)
+                results.append(reopened)
+                case('js','setup-after-identity-reopen','setup.js')
+                case('js','math-appearance','math-appearance.js')
+                (run/'identity-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Object identity checks passed. Evidence: {run}',flush=True)
+                return
             if args.body_check_only:
                 case('js','setup','setup.js')
                 native_case('body-controls-init','body-controls-init.js')
@@ -451,6 +463,8 @@ def main():
                 command(run, 'js', 'raster-reference', 'globalThis.rasterBaselineUrl=' + json.dumps(url) + '; return true;')
             case('js', 'raster', 'raster.js')
             case('js', 'large', 'large.js')
+            case('js', 'object-identity', 'object-identity.js')
+            case('js', 'math-appearance', 'math-appearance.js')
             case('js', 'math-output', 'math-output.js')
             case('js', 'format-roundtrip', 'format-roundtrip.js')
             case('js', 'body-start', 'body-start.js')

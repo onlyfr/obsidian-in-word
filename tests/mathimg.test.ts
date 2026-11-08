@@ -458,7 +458,7 @@ describe("load: pictures with the marker become LaTeX again", () => {
     expect(report.latex).toBe(1);
     expect(report.images).toBe(1);
     expect(md).toContain("then $x^2$ and $" + BOXED + "$ end");
-    expect(md.match(/kind=image/g)).toHaveLength(2);
+    expect(md.match(/word:img id=/g)).toHaveLength(2);
     // the neighbours keep their own bytes (the math picture's bytes were dropped from the list, not theirs)
     const stored = [...sc.entries()].filter(([, e]) => e.kind === "image").map(([, e]) => e.html);
     expect(stored[0]).toContain("Q0FU");

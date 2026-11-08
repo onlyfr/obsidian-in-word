@@ -12,9 +12,9 @@
  */
 import { RasterError, type MathRasterizer, type RasterResult } from "./mathimg";
 import {renderMathSvg} from './math-svg';
+import {normalizeMathAppearance,type MathAppearance} from './math-appearance';
 
 /** Body text size the picture is drawn for: Word's default 11 pt. */
-const FONT_PX = (11 * 96) / 72;
 const SCALE = 3;
 /** Transparent margin around the formula (CSS px), so glyph overhang and `\cancel` strokes are not clipped. */
 const PAD = 3;
@@ -28,7 +28,8 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-export async function createRasterizer(): Promise<MathRasterizer> {
+export async function createRasterizer(appearance?:MathAppearance): Promise<MathRasterizer> {
+  const style=normalizeMathAppearance(appearance),fontPx=style.sizePt*96/72;
   return {
     async render(latex: string, display: boolean): Promise<RasterResult> {
       let svg:SVGSVGElement;
@@ -37,7 +38,7 @@ export async function createRasterizer(): Promise<MathRasterizer> {
       // MathJax SVG uses 1000 units per em. Its y=0 is the formula baseline.
       const [x,y,width,height]=(svg.getAttribute('viewBox')??'').trim().split(/\s+/).map(Number);
       if(![x,y,width,height].every(Number.isFinite) || !(width>0 && height>0))throw new RasterError('blank','empty layout');
-      const unit=FONT_PX/1000;
+      const unit=fontPx/1000;
       const w = Math.ceil(width*unit) + 2 * PAD;
       const h = Math.ceil(height*unit) + 2 * PAD;
       const baseline = -y*unit + PAD;
@@ -45,7 +46,7 @@ export async function createRasterizer(): Promise<MathRasterizer> {
 
       // Match viewBox and physical dimensions to keep 1em at FONT_PX, including the transparent margin.
       svg.setAttribute('viewBox',`${x-PAD/unit} ${y-PAD/unit} ${w/unit} ${h/unit}`);
-      svg.setAttribute('color','#000');
+      svg.setAttribute('color',style.color);
       svg.setAttribute("width", String(w));
       svg.setAttribute("height", String(h));
       const xml = new XMLSerializer().serializeToString(svg);
