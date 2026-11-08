@@ -64,7 +64,7 @@ describe("task pane start-up status", () => {
     expect(select.value).toBe('images');
     button.click();await settle();
     expect(apply).toHaveBeenCalledTimes(1);
-    expect(apply.mock.calls[0][2]).toEqual({mathOutput:'images',mathAppearance:{sizePt:11,color:'#000000'}});
+    expect(apply.mock.calls[0][2]).toEqual({mathOutput:'images',mathAppearance:{sizePt:11,color:'#000000'},mathAppearanceSource:'manual'});
     expect(button.disabled).toBe(true);expect(select.disabled).toBe(true);
     expect((document.getElementById('editor-wrap') as HTMLInputElement).disabled).toBe(true);
     button.click();(document.getElementById('load') as HTMLButtonElement).click();
@@ -98,5 +98,15 @@ describe("task pane start-up status", () => {
     expect((document.getElementById('editor-wrap') as HTMLInputElement).checked).toBe(false);
     expect((document.getElementById('editor-font-size') as HTMLSelectElement).value).toBe('20');
     expect(document.querySelector('.cm-lineNumbers')).toBeNull();expect(document.querySelector('.cm-lineWrapping')).toBeNull();
+  });
+  it('restores selection style choice and keeps manual controls disabled until manual mode',async()=>{
+    localStorage.setItem('oiw:math-output','images');localStorage.setItem('oiw:math-image-appearance-source','selection');
+    localStorage.setItem('oiw:math-image-appearance',JSON.stringify({sizePt:16,color:'#2457a6'}));
+    await import('../src/taskpane/taskpane');await settle();
+    const source=document.getElementById('math-appearance-source') as HTMLSelectElement;
+    const size=document.getElementById('math-image-size') as HTMLInputElement;
+    expect(source.value).toBe('selection');expect(source.disabled).toBe(false);expect(size.disabled).toBe(true);
+    source.value='manual';source.dispatchEvent(new Event('change'));
+    expect(size.disabled).toBe(false);expect(size.value).toBe('16');expect(localStorage.getItem('oiw:math-image-appearance-source')).toBe('manual');
   });
 });

@@ -57,4 +57,14 @@ for(let i=0;i<3;i++){
  must(JSON.stringify(spans(loaded.markdown))===JSON.stringify(spans(seed)),'all math sources retained cycle '+i);
  must(!after.markers.length,'no unresolved internal marker');cycles.push(brief(after));
 }
-return {whole:spans(full.markdown),individual:spans(individual.markdown),paragraph:spans(paragraph.markdown),notes:full.notes,before:brief(before),cycles};
+// With only an opaque table selected, image style options must not inspect/rewrite its nested math.
+await Word.run(async c=>{c.document.body.tables.getFirst().getRange('Whole').select();await c.sync();});
+const tableRead=await word.readSelectionAsMarkdown();
+must(tableRead.markdown.includes('kind=table') && !spans(tableRead.markdown).length,'math table stays a Word original object');
+const tableBefore=await snapshot();
+const tableApplied=await word.replaceSelectionWithMarkdown(tableRead.markdown,async()=>true,{mathOutput:'images',mathAppearanceSource:'selection',mathAppearance:{sizePt:30,color:'#ff0000'}});
+const tableAfter=await snapshot();
+must(!tableApplied.notes.some(note=>note.includes('선택 영역 서식')),'opaque-only apply does not resolve image appearance');
+must(tableAfter.tables===tableBefore.tables && tableAfter.equations===tableBefore.equations && tableAfter.mathImages===tableBefore.mathImages,'opaque table retains nested object counts despite appearance option');
+await selectAll();
+return {whole:spans(full.markdown),individual:spans(individual.markdown),paragraph:spans(paragraph.markdown),notes:full.notes,before:brief(before),cycles,opaqueOptionsUnchanged:true};

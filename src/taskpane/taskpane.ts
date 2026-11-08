@@ -1,7 +1,7 @@
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { loadMathOutput, saveMathOutput,loadMathAppearance,saveMathAppearance,loadEditorPreferences,saveEditorPreferences,type EditorPreferences } from "./preferences";
+import { loadMathOutput, saveMathOutput,loadMathAppearance,saveMathAppearance,loadMathAppearanceSource,saveMathAppearanceSource,loadEditorPreferences,saveEditorPreferences,type EditorPreferences } from "./preferences";
 import {normalizeMathAppearance} from '../convert/math-appearance';
 import {initSettingsDialog} from "./settings-dialog";
 import {bindBodyControls} from "./body-binding";
@@ -20,9 +20,15 @@ const mathOutput = document.getElementById("math-output") as HTMLSelectElement;
 mathOutput.value = loadMathOutput();
 const mathSize=document.getElementById('math-image-size') as HTMLInputElement;
 const mathColor=document.getElementById('math-image-color') as HTMLInputElement;
+const mathSource=document.getElementById('math-appearance-source') as HTMLSelectElement;
+mathSource.value=loadMathAppearanceSource();
 let mathAppearance=loadMathAppearance();
 mathSize.value=String(mathAppearance.sizePt);mathColor.value=mathAppearance.color;
-const updateMathControls=()=>{mathSize.disabled=mathColor.disabled=busy || mathOutput.value!=='images';};
+const updateMathControls=()=>{
+  mathSource.disabled=busy || mathOutput.value!=='images';
+  mathSize.disabled=mathColor.disabled=mathSource.disabled || mathSource.value==='selection';
+};
+mathSource.onchange=()=>{saveMathAppearanceSource(mathSource.value==='selection'?'selection':'manual');updateMathControls();};
 mathOutput.onchange = () => {saveMathOutput(mathOutput.value === "images" ? "images" : "hybrid");updateMathControls();};
 const saveMathStyle=()=>{
   mathAppearance=normalizeMathAppearance({sizePt:Number(mathSize.value),color:mathColor.value});
@@ -89,7 +95,7 @@ updateMathControls();
 async function run(label: string, fn: () => Promise<string[] | void>) {
   if (busy) return;
   busy = true;
-  const controls = [document.getElementById("load"), document.getElementById("apply"), mathOutput,mathSize,mathColor,numbers,wrap,fontSize] as (HTMLButtonElement | HTMLSelectElement | HTMLInputElement)[];
+  const controls = [document.getElementById("load"), document.getElementById("apply"), mathOutput,mathSource,mathSize,mathColor,numbers,wrap,fontSize] as (HTMLButtonElement | HTMLSelectElement | HTMLInputElement)[];
   controls.forEach(c => c.disabled = true);
   try {
     setStatus(`${label}…`);
@@ -123,7 +129,7 @@ Office.onReady((info) => {
       const { askConfirm } = await import("./confirm");
       const { missing, notes } = await replaceSelectionWithMarkdown(view.state.doc.toString(), (msg) =>
         askConfirm(document.body, msg, "바꾸기", "취소"),
-        { mathOutput: mathOutput.value as MathOutputMode,mathAppearance },
+        { mathOutput: mathOutput.value as MathOutputMode,mathAppearance,mathAppearanceSource:mathSource.value==='selection'?'selection':'manual' },
       );
       if (missing.length) throw new Error(`복원할 수 없는 Word 객체: ${missing.join(", ")}`);
       return [...new Set(notes)];
