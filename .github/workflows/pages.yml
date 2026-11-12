@@ -25,6 +25,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - run: dotnet run --project scripts/windows-setup-checks/WindowsHostChecks.csproj -c Release
       - run: dotnet publish native/windows-host/ObsidianInWord.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/app
       - shell: pwsh
         run: |

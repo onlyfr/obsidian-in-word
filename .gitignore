@@ -9,4 +9,6 @@ native/windows-host/bin/
 native/windows-host/obj/
 scripts/windows-host/bin/
 scripts/windows-host/obj/
+scripts/windows-setup-checks/bin/
+scripts/windows-setup-checks/obj/
 __pycache__/
