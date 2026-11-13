@@ -83,6 +83,15 @@
           <div class="community-pages" hidden id="community-pages"><button id="community-prev" type="button">이전</button><span id="community-page"></span><button id="community-next" type="button">다음</button></div>
         </fieldset>
         <h3>설치한 플러그인</h3>
+        <fieldset class="option-group">
+          <legend>플러그인·옵션 이관</legend>
+          <p class="option-help">기존 작업창에서 내보낸 JSON을 Windows 앱에서 가져오세요. 새 플러그인은 꺼짐으로 설치하고, 같은 ID의 기존 설치·설정은 건너뜁니다. 다른 Word 작업창은 닫고 이관하세요. 파일에 플러그인 코드와 설정의 인증정보가 포함될 수 있으므로 보관·공유에 유의하세요.</p>
+          <button id="transfer-export" type="button" disabled>플러그인·옵션 내보내기</button>
+          <details id="transfer-json" hidden><summary>다운로드가 안 되면 JSON을 복사해 저장</summary><p class="option-help">아래 내용을 복사해 UTF-8 JSON 파일로 저장할 수 있습니다. 플러그인 설정의 인증정보가 포함될 수 있습니다.</p><textarea id="transfer-json-text" readonly wrap="off" rows="6" aria-label="내보낸 이관 JSON" style="width:100%;box-sizing:border-box"></textarea></details>
+          <label class="option-check"><input id="transfer-preferences" type="checkbox" checked>가져올 때 에디터·수식 옵션도 적용</label>
+          <label for="transfer-file">이관 파일 가져오기 (JSON, 최대 50MB)</label><input id="transfer-file" type="file" accept=".json,application/json" disabled>
+          <p id="transfer-status" role="status" aria-live="polite">Word 문서와 앱 연결 토큰은 이관하지 않습니다.</p>
+        </fieldset>
         <label for="plugin-files">manifest.json과 main.js를 함께 선택하세요. styles.css는 선택입니다.</label>
         <input id="plugin-files" type="file" multiple accept=".js,.json,.css" disabled />
         <div id="plugin-list"></div>

@@ -7,11 +7,13 @@ import subprocess
 import time
 import uuid
 import winreg
+import argparse
 import socket
 import ssl
 from urllib.request import Request,urlopen
 
 repo=Path(__file__).resolve().parents[2]
+parser=argparse.ArgumentParser();parser.add_argument('--transfer-source',type=Path);args=parser.parse_args()
 spec=importlib.util.spec_from_file_location('word_harness',repo/'scripts/word-host/run.py');harness=importlib.util.module_from_spec(spec);spec.loader.exec_module(harness)
 if b'WINWORD.EXE' in subprocess.run(['tasklist','/FI','IMAGENAME eq WINWORD.EXE','/NH'],capture_output=True).stdout:raise SystemExit('Close Word before this owned-fixture test.')
 deadline=time.monotonic()+100
@@ -40,6 +42,15 @@ with (run/'server.log').open('w') as server_log,(run/'word.log').open('w') as wo
   harness.wait_result(run,'js','ready',90,word)
   result=harness.command(run,'js','windows-app',(repo/'scripts/windows-host/word-case.js').read_text(encoding='utf-8'),worker=word)
   (run/'summary.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');print('Evidence: '+str(run),flush=True)
+  if args.transfer_source:
+   source=json.loads(args.transfer_source.read_text(encoding='utf-8'))
+   exported=next(item['value'] for item in source if item['id']=='transfer-source')
+   code='const transferArchive='+json.dumps(exported['archive'])+';const transferSourceOrigin='+json.dumps(exported['origin'])+';'+(repo/'scripts/windows-host/transfer-case.js').read_text(encoding='utf-8')
+   transferred=harness.command(run,'js','transfer-target',code,worker=word)
+   harness.command(run,'com','transfer-reopen',(repo/'scripts/word-host/cases/session-reopen.ps1').read_text(encoding='utf-8'),worker=word)
+   code='const transferExpected='+json.dumps(transferred['value'])+';'+(repo/'scripts/windows-host/transfer-reopened.js').read_text(encoding='utf-8')
+   reopened=harness.command(run,'js','transfer-reopened',code,worker=word)
+   (run/'transfer-summary.json').write_text(json.dumps([transferred,reopened],ensure_ascii=False,indent=2),encoding='utf-8')
  finally:
   if word is not None and word.poll() is None:
    harness.command(run,'com','close','$true',15);word.wait(timeout=20)
