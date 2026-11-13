@@ -5,6 +5,8 @@ import { MarkdownView, PluginHost, type CompatReport, type PluginManifest, type 
 import { askConfirm } from "./confirm";
 import { LocalDataStore, PluginLibrary, type StoredPlugin } from "../plugins/storage";
 import {initCommunityBrowser} from './community-browser';
+import {initTransferUi,type TransferUiOptions} from './transfer-ui';
+import {recoverTransfer,hasPendingTransfer} from './transfer';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -16,9 +18,11 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = "", cls = ""):
 }
 
 /** Wire the Obsidian plugin host to the task pane: file loading, list, commands, hotkeys. */
-export async function initPlugins(view: EditorView, compartment: Compartment, setStatus: (m: string) => void,openPanel:()=>void=()=>{}): Promise<PluginHost> {
+export async function initPlugins(view: EditorView, compartment: Compartment, setStatus: (m: string) => void,openPanel:()=>void=()=>{},transferOptions?:TransferUiOptions): Promise<PluginHost> {
   const library = new PluginLibrary();
-  const host = new PluginHost(new LocalDataStore(), (m) => setStatus(m));
+  const dataStore=new LocalDataStore();
+  if(transferOptions && hasPendingTransfer())await transferOptions.exclusive(async()=>{if(await recoverTransfer(library))transferOptions.preferencesChanged();});
+  const host = new PluginHost(dataStore, (m) => setStatus(m));
   host.activeView = new MarkdownView(new ObsidianEditor(view));
 
   const list = $("plugin-list");
@@ -163,6 +167,9 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
     select.disabled=changing || commands.length===0;$<HTMLButtonElement>("plugin-run").disabled=changing || commands.length===0;
     $<HTMLInputElement>('plugin-files').disabled=changing;
     browser?.refresh();
+    document.getElementById('transfer-export')?.toggleAttribute('disabled',changing);
+    document.getElementById('transfer-file')?.toggleAttribute('disabled',changing);
+    document.getElementById('transfer-preferences')?.toggleAttribute('disabled',changing);
   };
 
   host.onChange = () => {
@@ -214,8 +221,9 @@ export async function initPlugins(view: EditorView, compartment: Compartment, se
     render();
     return true;
   }});
+  if(transferOptions)initTransferUi({library,dataStore,installed:()=>plugins,runOperation,
+    changed:async()=>{plugins=await library.list();render();},...transferOptions});
   render();
-  $<HTMLInputElement>("plugin-files").disabled=false;
   $("plugin-loading").hidden=true;
   return host;
 }

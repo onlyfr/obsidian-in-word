@@ -79,7 +79,8 @@ const afterPaint = () => {
     .then((m) => view.dispatch({ effects: markdownLanguage.reconfigure(m.markdown()) }))
     .catch((e) => setStatus(`마크다운 언어 지원을 불러오지 못했습니다: ${(e as Error).message}`));
   import("./plugins-ui")
-    .then((m) => m.initPlugins(view, pluginExtensions, setStatus,()=>settings.open("plugins")))
+    .then((m) => m.initPlugins(view, pluginExtensions, setStatus,()=>settings.open("plugins"),{exclusive:withPaneLock,preferencesChanged:refreshPreferences,
+      preferencesSnapshot:()=>({editor:{...preferences},mathAppearance:{...mathAppearance},mathOutput:mathOutput.value==='images'?'images':'hybrid',mathSource:mathSource.value==='selection'?'selection':'manual'})}))
     .catch((e) => {
       const message=`플러그인 초기화 실패: ${(e as Error).message}`;
       document.getElementById("plugin-loading")!.textContent=message;setStatus(message);
@@ -92,21 +93,30 @@ setTimeout(afterPaint, 0);
 
 let busy = false;
 updateMathControls();
+function refreshPreferences(){
+  preferences=loadEditorPreferences();mathAppearance=loadMathAppearance();
+  numbers.checked=preferences.lineNumbers;wrap.checked=preferences.wrap;fontSize.value=String(preferences.fontSize);
+  mathOutput.value=loadMathOutput();mathSource.value=loadMathAppearanceSource();mathSize.value=String(mathAppearance.sizePt);mathColor.value=mathAppearance.color;
+  view.dispatch({effects:editorOptions.reconfigure(appearance(preferences))});updateMathControls();
+}
+async function withPaneLock<T>(action:()=>Promise<T>):Promise<T>{
+  if(busy)throw new Error('다른 작업이 진행 중입니다. 완료 후 이관하세요.');
+  busy=true;
+  const controls=[document.getElementById('load'),document.getElementById('apply'),mathOutput,mathSource,mathSize,mathColor,numbers,wrap,fontSize] as (HTMLButtonElement|HTMLSelectElement|HTMLInputElement)[];
+  controls.forEach(control=>control.disabled=true);
+  try{return await action();}
+  finally{busy=false;controls.forEach(control=>control.disabled=false);updateMathControls();}
+}
 async function run(label: string, fn: () => Promise<string[] | void>) {
   if (busy) return;
-  busy = true;
-  const controls = [document.getElementById("load"), document.getElementById("apply"), mathOutput,mathSource,mathSize,mathColor,numbers,wrap,fontSize] as (HTMLButtonElement | HTMLSelectElement | HTMLInputElement)[];
-  controls.forEach(c => c.disabled = true);
   try {
+    await withPaneLock(async()=>{
     setStatus(`${label}…`);
     const notes = (await fn()) ?? [];
     setStatus([`${label} 완료`, ...notes].join(" · "));
+    });
   } catch (e) {
     setStatus(`${label} 실패: ${(e as Error).message}`);
-  } finally {
-    busy = false;
-    controls.forEach(c => c.disabled = false);
-    updateMathControls();
   }
 }
 

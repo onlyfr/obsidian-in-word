@@ -99,6 +99,18 @@ describe("task pane start-up status", () => {
     expect((document.getElementById('editor-font-size') as HTMLSelectElement).value).toBe('20');
     expect(document.querySelector('.cm-lineNumbers')).toBeNull();expect(document.querySelector('.cm-lineWrapping')).toBeNull();
   });
+  it('refuses a settings transfer during Word apply, then refreshes options without replacing the editor document',async()=>{
+    let transfer:any,finish!:()=>void;
+    const pending=new Promise<void>(resolve=>{finish=resolve;});
+    vi.doMock('../src/taskpane/plugins-ui',()=>({initPlugins:async(...args:any[])=>{transfer=args[4];}}));
+    vi.doMock('../src/taskpane/word',()=>({replaceSelectionWithMarkdown:async()=>{await pending;return {missing:[],notes:[]};}}));
+    await import('../src/taskpane/taskpane');await settle();ready!({host:'Word'});
+    document.getElementById('apply')!.click();await settle();const action=vi.fn();
+    await expect(transfer.exclusive(action)).rejects.toThrow('진행 중');expect(action).not.toHaveBeenCalled();
+    finish();await settle();const content=document.querySelector('.cm-content')!.textContent;
+    await transfer.exclusive(async()=>{localStorage.setItem('oiw:editor-options',JSON.stringify({lineNumbers:false,wrap:false,fontSize:18}));transfer.preferencesChanged();});
+    expect((document.getElementById('editor-font-size') as HTMLSelectElement).value).toBe('18');expect(document.querySelector('.cm-content')!.textContent).toBe(content);
+  });
   it('restores selection style choice and keeps manual controls disabled until manual mode',async()=>{
     localStorage.setItem('oiw:math-output','images');localStorage.setItem('oiw:math-image-appearance-source','selection');
     localStorage.setItem('oiw:math-image-appearance',JSON.stringify({sizePt:16,color:'#2457a6'}));

@@ -117,6 +117,7 @@ def main():
     parser.add_argument('--compare-raster-ref', help='Compare raster dimensions/baseline/PNG bytes with a git commit hash')
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
     parser.add_argument('--settings-ui-only', action='store_true', help='Run actual task-pane settings tabs/editor/plugin UI checks without keyboard input')
+    parser.add_argument('--transfer-only', action='store_true', help='Export synthetic settings from the real web task pane for native transfer tests')
     parser.add_argument('--community-only', action='store_true', help='Check live community catalog/release downloads and plugin UI without keys')
     parser.add_argument('--math-only', action='store_true', help='Run actual raster and math output mode checks without keyboard input')
     parser.add_argument('--identity-only', action='store_true', help='Run mixed object identity and selection-scope stability checks')
@@ -296,6 +297,14 @@ def main():
                 case('js','settings-ui','settings-ui.js')
                 (run/'settings-ui-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
                 print(f'Task-pane settings UI passed. Evidence: {run}',flush=True)
+                return
+            if args.transfer_only:
+                case('js','setup','setup.js')
+                case('js','settings-ui','settings-ui.js')
+                exported=case('js','transfer-source','transfer-source.js')['value']
+                (run/'transfer.json').write_text(exported['archive'],encoding='utf-8')
+                (run/'transfer-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+                print(f'Transfer source passed. Archive: {run / "transfer.json"}',flush=True)
                 return
             if args.community_only:
                 case('js','setup','setup.js')
