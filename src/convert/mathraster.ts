@@ -5,16 +5,16 @@
  * MathJax SVG includes its own glyph paths; it needs no installed font or external font files.
  * an SVG that is loaded as an `<img>` cannot
  * run scripts or fetch resources and does not taint the canvas (measured, see docs/unsupported-syntax.md).
- * Text colour policy: black (#000) on a transparent background, whatever the page colour is.
+ * Draw in the selected colour on a transparent background.
  *
  * Browser only (DOM + canvas). TeX extensions are bundled explicitly, with no dynamic loader or HTML commands.
  * Generated SVG is rebuilt with a geometry/text allowlist. Throws {@link RasterError}.
  */
-import { RasterError, type MathRasterizer, type RasterResult } from "./mathimg";
+import { LIMITS, RasterError, type MathRasterizer, type RasterResult } from "./mathimg";
 import {renderMathSvg} from './math-svg';
 import {normalizeMathAppearance,type MathAppearance} from './math-appearance';
 
-/** Body text size the picture is drawn for: Word's default 11 pt. */
+/** Raster pixels per CSS pixel. */
 const SCALE = 3;
 /** Transparent margin around the formula (CSS px), so glyph overhang and `\cancel` strokes are not clipped. */
 const PAD = 3;
@@ -42,7 +42,7 @@ export async function createRasterizer(appearance?:MathAppearance): Promise<Math
       const w = Math.ceil(width*unit) + 2 * PAD;
       const h = Math.ceil(height*unit) + 2 * PAD;
       const baseline = -y*unit + PAD;
-      if (w > 4000 || h > 2000) throw new RasterError("too-large", `${w}x${h}px`);
+      if (w > LIMITS.maxWidth || h > LIMITS.maxHeight) throw new RasterError("too-large", `${w}x${h}px`);
 
       // Match viewBox and physical dimensions to keep 1em at FONT_PX, including the transparent margin.
       svg.setAttribute('viewBox',`${x-PAD/unit} ${y-PAD/unit} ${w/unit} ${h/unit}`);
@@ -70,7 +70,9 @@ export async function createRasterizer(appearance?:MathAppearance): Promise<Math
         if (e instanceof RasterError) throw e;
         throw new RasterError("tainted", (e as Error)?.message);
       }
-      return { png: url.slice(url.indexOf(",") + 1), w, h, baseline, scale: SCALE };
+      const prefix = "data:image/png;base64,";
+      if (!url.startsWith(prefix) || url.length === prefix.length) throw new RasterError("error", "PNG encoding failed");
+      return { png: url.slice(prefix.length), w, h, baseline, scale: SCALE };
     },
   };
 }

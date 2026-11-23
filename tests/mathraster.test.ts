@@ -80,6 +80,15 @@ describe('MathJax raster output',()=>{
   expect(svg.getAttribute('color')).toBe('#000000');expect(svg.querySelector('foreignObject')).toBeNull();
   expect(renderMathSvg).toHaveBeenCalledWith('x',true);
  });
+ it('rejects oversize geometry before decoding or allocating the image',async()=>{
+  const sources=rasterHost('0 0 100000 1000');
+  await expect((await createRasterizer()).render('x',false)).rejects.toMatchObject({code:'too-large'});
+  expect(sources).toHaveLength(0);
+ });
+ it('rejects an empty canvas export',async()=>{
+  rasterHost();vi.mocked(HTMLCanvasElement.prototype.toDataURL).mockReturnValue('data:,');
+  await expect((await createRasterizer()).render('x',false)).rejects.toMatchObject({code:'error'});
+ });
  it.each(['0 0 0 20','0 0 NaN 20','0 0 1000000 1000'])('refuses empty, invalid or excessive SVG geometry: %s',async viewBox=>{
   rasterHost(viewBox);await expect((await createRasterizer()).render('x',false)).rejects.toThrow();
  });

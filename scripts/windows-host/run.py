@@ -16,6 +16,7 @@ repo=Path(__file__).resolve().parents[2]
 parser=argparse.ArgumentParser();parser.add_argument('--transfer-source',type=Path);args=parser.parse_args()
 spec=importlib.util.spec_from_file_location('word_harness',repo/'scripts/word-host/run.py');harness=importlib.util.module_from_spec(spec);spec.loader.exec_module(harness)
 if b'WINWORD.EXE' in subprocess.run(['tasklist','/FI','IMAGENAME eq WINWORD.EXE','/NH'],capture_output=True).stdout:raise SystemExit('Close Word before this owned-fixture test.')
+harness.check_dev_certificate()
 deadline=time.monotonic()+100
 while True:
  with socket.socket() as check:

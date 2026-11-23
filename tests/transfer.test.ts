@@ -100,7 +100,7 @@ it('resolves a committed record left behind when journal deletion fails without 
 it('reports a blocked v1 upgrade instead of showing an empty installed list',async()=>{
  const old=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('oiw-plugins',1);request.onupgradeneeded=()=>request.result.createObjectStore('plugins').put(bundle,bundle.manifest.id);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
  const blocked=new PluginLibrary();await expect(blocked.list()).rejects.toThrow('다른 Word');old.close();
- expect((await new PluginLibrary().list()).map(p=>p.manifest.id)).toEqual([bundle.manifest.id]);
+ expect((await blocked.list()).map(p=>p.manifest.id)).toEqual([bundle.manifest.id]);
 });
 it('does not resurrect cached plugins after another pane removes the last persisted entry',async()=>{
  const library=new PluginLibrary();await library.save(bundle);await new PluginLibrary().remove(bundle.manifest.id);

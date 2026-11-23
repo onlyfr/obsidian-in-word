@@ -55,7 +55,7 @@ export class PluginLibrary {
           if(blocked){req.result.close();return;}
           req.result.onversionchange=()=>{req.result.close();this.db=null;};resolve(req.result);
         };
-        req.onblocked=()=>{blocked=true;reject(new Error('다른 Word 작업창이 저장소 갱신을 막고 있습니다. 다른 작업창을 닫고 다시 여세요.'));};
+        req.onblocked=()=>{blocked=true;this.db=null;reject(new Error('다른 Word 작업창이 저장소 갱신을 막고 있습니다. 다른 작업창을 닫고 다시 여세요.'));};
         req.onerror = () => req.error?.name==='VersionError'?reject(new Error('더 최신 저장소가 있습니다. 앱을 업데이트하세요.')):resolve(null);
       } catch {
         resolve(null);

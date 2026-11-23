@@ -88,7 +88,7 @@ export interface PictureOutcome {
 export interface LiteralOutcome {
   kind: "literal";
   item: MathResolved;
-  reason: RasterFailure | "too-long";
+  reason: RasterFailure | "too-long" | "id-conflict";
 }
 export type MathImgOutcome = PictureOutcome | LiteralOutcome;
 
@@ -145,13 +145,17 @@ export async function resolveMathImages(
     const id = mathImgKey(item.latex, item.display,profile);
     const key = id;
     const prev = done.get(key);
-    if (prev) {
+    if (prev && prev.item.latex === item.latex && prev.item.display === item.display) {
       out.push({ ...prev, item } as MathImgOutcome);
       continue;
     }
     const stored = sidecar.get(id);
     let res: MathImgOutcome;
-    if (validEntry(stored, item.latex, item.display,profile)) res = { kind: "image", item, id, entry: stored, stored: true };
+    if (stored && (stored.kind !== "mathimg" ||
+        (stored.latex !== undefined && stored.latex !== item.latex) ||
+        !!stored.display !== item.display || (stored.renderProfile ?? "") !== profile))
+      res = { kind: "literal", item, reason: "id-conflict" };
+    else if (validEntry(stored, item.latex, item.display,profile)) res = { kind: "image", item, id, entry: stored, stored: true };
     else if (item.latex.length > LIMITS.maxLatex) res = { kind: "literal", item, reason: "too-long" };
     else if (now() - started > LIMITS.budgetMs) res = { kind: "literal", item, reason: "timeout" };
     else {
@@ -258,6 +262,7 @@ export function literalMathHtml(latex: string, display: boolean): string {
 
 const REASON_TEXT: Record<LiteralOutcome["reason"], string> = {
   "too-long": `LaTeX가 ${LIMITS.maxLatex}자를 넘음`,
+  "id-conflict": "기존 개체와 식별자가 겹침",
   "too-large": "그림이 너무 큼",
   timeout: "그리기 시간 초과",
   unavailable: "수식 그리기 기능을 불러오지 못함",

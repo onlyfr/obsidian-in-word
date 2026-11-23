@@ -145,6 +145,17 @@ describe("ladder decision", () => {
     expect(e).toMatchObject({ kind: "mathimg", latex: BOXED, display: false, png: PNG, w: 60, h: 24, baseline: 17, v: MATHIMG_VERSION });
   });
 
+  it("preserves both sources when different equations have the same image ID", async () => {
+    const first = "1bdzggq", second = "11lg21t", id = mathImgKey(first, false);
+    expect(mathImgKey(second, false)).toBe(id);
+    const sc = new MemorySidecar(), f = fake();
+    const out = await resolveMathImages(items(`$${first}$ $${second}$ $${first}$`), sc, f.loader);
+    expect(out.map(value => value.kind)).toEqual(["image", "literal", "image"]);
+    expect(out[1]).toMatchObject({item: {latex: second}, reason: "id-conflict"});
+    expect(sc.get(id)?.latex).toBe(first);
+    expect(f.calls).toEqual(["I:" + first]);
+  });
+
   it("unchanged -> the stored picture, byte for byte, and no render at all", async () => {
     const sc = new MemorySidecar();
     const first = fake((_l, _d) => ok({ png: "AAAA" }));

@@ -21,22 +21,24 @@ public static class HostServer
             if (context.Request.Host.Value != "localhost:" + Port) { context.Response.StatusCode = 403;return; }
             context.Response.Headers.CacheControl = "no-store";context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             context.Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
-            var path = context.Request.Path.Value;
-            if (path == "/host-session")
-            {
-                var origin = context.Request.Headers.Origin.ToString();
-                if (context.Request.Method != "GET" || context.Request.Headers["X-OIW-Host"] != "1" || (origin != "" && origin != Origin))
-                { context.Response.StatusCode = 403;return; }
-            }
-            else if (path is "/status" or "/asset")
-            {
-                if (context.Request.Headers.Origin != Origin || context.Request.Method != "POST" || context.Request.Headers.Authorization != "Bearer " + token)
-                { context.Response.StatusCode = 403;return; }
-            }
             await next(context);
         });
-        app.MapGet("/host-session", () => Results.Json(new { protocol = 1, token, capabilities = new { downloads = true, body = false } }));
-        app.MapPost("/status", () => Results.Json(new { protocol = 1 }));app.MapPost("/asset", (Func<HttpContext, Task<IResult>>)Downloads.Asset);
+        app.MapGet("/host-session", (HttpContext context) =>
+        {
+            var origin = context.Request.Headers.Origin.ToString();
+            if (context.Request.Headers["X-OIW-Host"] != "1" || (origin != "" && origin != Origin))
+                return Results.StatusCode(403);
+            return Results.Json(new { protocol = 1, token, capabilities = new { downloads = true, body = false } });
+        });
+        var api = app.MapGroup("").AddEndpointFilter(async (invocation, next) =>
+        {
+            var headers = invocation.HttpContext.Request.Headers;
+            if (headers.Origin != Origin || headers.Authorization != "Bearer " + token)
+                return Results.StatusCode(403);
+            return await next(invocation);
+        });
+        api.MapPost("/status", () => Results.Json(new { protocol = 1 }));
+        api.MapPost("/asset", (Func<HttpContext, Task<IResult>>)Downloads.Asset);
         app.MapGet("/{**path}", (string? path) =>
         {
             path = string.IsNullOrEmpty(path) ? "index.html" : path;

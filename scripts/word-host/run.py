@@ -46,6 +46,21 @@ def command(directory, kind, ident, code, timeout=120, worker=None):
     return result
 
 
+def check_dev_certificate():
+    for name in ('localhost.key', 'localhost.crt'):
+        if not (Path.home() / '.office-addin-dev-certs' / name).is_file():
+            raise SystemExit('Trusted Office development certificates are required; see scripts/word-host/README.md.')
+    cert = Path.home() / '.office-addin-dev-certs/localhost.crt'
+    script = """const cert = new (require('node:crypto').X509Certificate)(require('node:fs').readFileSync(process.argv[1]));
+const now = Date.now();
+if (now < Date.parse(cert.validFrom) || now >= Date.parse(cert.validTo)) {
+  console.error('Office development certificate is outside its validity period: ' + cert.validFrom + ' to ' + cert.validTo);
+  process.exitCode = 1;
+}"""
+    if subprocess.run(['node', '-e', script, str(cert)]).returncode:
+        raise SystemExit('Check the Office development certificate before running Word acceptance.')
+
+
 def prepare(directory, settings, port):
     guid = str(uuid.uuid4())
     manifest = (REPO / 'manifest.xml').read_text(encoding='utf-8')
@@ -140,9 +155,7 @@ def main():
     for exe in ('node', 'powershell.exe'):
         if not shutil.which(exe):
             raise SystemExit(f'Missing prerequisite: {exe}')
-    for name in ('localhost.key', 'localhost.crt'):
-        if not (Path.home() / '.office-addin-dev-certs' / name).is_file():
-            raise SystemExit('Trusted Office development certificates are required; see scripts/word-host/README.md.')
+    check_dev_certificate()
     cache = Path(os.environ.get('npm_config_cache', str(Path(os.environ['LOCALAPPDATA']) / 'npm-cache')))
     candidates = sorted(cache.glob('_npx/*/node_modules/office-addin-dev-settings'))
     settings = args.dev_settings_dir or (candidates[-1] if candidates else None)
