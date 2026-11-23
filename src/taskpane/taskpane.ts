@@ -1,3 +1,4 @@
+import {wordObjectLabels} from "./object-labels";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -47,6 +48,7 @@ const appearance=(options:EditorPreferences)=>[
   EditorView.theme({"&":{fontSize:`${options.fontSize}px`}}),
 ];
 const extensions = [
+  wordObjectLabels,
   editorOptions.of(appearance(preferences)),
   history(),
   keymap.of([...defaultKeymap, ...historyKeymap]),

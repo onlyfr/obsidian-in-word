@@ -1,0 +1,18 @@
+const must=(ok,message)=>{if(!ok)throw new Error(message);};
+const markup=new DOMParser().parseFromString(await (await fetch('/src/taskpane/index.html')).text(),'text/html');
+markup.body.querySelectorAll('script').forEach(script=>script.remove());
+document.body.innerHTML=markup.body.innerHTML;
+await import('/src/taskpane/taskpane.ts');
+const wait=async(check,message)=>{const end=Date.now()+10000;while(Date.now()<end && !check())await new Promise(r=>setTimeout(r,40));must(check(),message);};
+await wait(()=>document.getElementById('load').onclick,'production pane ready');
+await Word.run(async c=>{c.document.body.tables.getFirst().getRange('Whole').select();await c.sync();});
+const before=await snapshot();
+document.getElementById('load').click();
+await wait(()=>document.querySelector('.cm-word-object')?.textContent==='Word 원본 표','table displayed as original Word table');
+document.querySelector('.cm-word-object').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));
+must(/<!-- word:obj id=[0-9a-f]{8} kind=table -->/.test(document.querySelector('.cm-content').textContent),'raw table identifier restored on click');
+document.getElementById('apply').click();
+await wait(()=>document.getElementById('status').textContent.includes('적용 완료'),'original table applied through pane');
+const after=await snapshot();
+must(before.tables===after.tables && before.mathImages===after.mathImages && before.equations===after.equations && after.tables>0,'nested Word objects survive editor labels');
+return {tableLabel:true,source:true,apply:true};

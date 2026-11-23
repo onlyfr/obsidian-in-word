@@ -247,6 +247,7 @@ def main():
                 case('com','identity-reopen','session-reopen.ps1')
                 reopened=command(run,'js','identity-reopened','const identityExpected='+json.dumps(identity,ensure_ascii=True)+';'+(SCRIPTS/'cases'/'identity-reopened.js').read_text(encoding='utf-8'),worker=word)
                 results.append(reopened)
+                case('js','object-labels','object-labels.js')
                 case('js','setup-after-identity-reopen','setup.js')
                 case('js','math-appearance','math-appearance.js')
                 (run/'identity-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')

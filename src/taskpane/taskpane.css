@@ -78,3 +78,4 @@ button { flex: 1; padding: 6px 8px; cursor: pointer; }
 #plugin-settings .setting-unsupported { font-size: 11px; opacity: 0.7; font-style: italic; }
 #plugin-settings .cm-editor { max-width: 100%; height: auto; min-height: 6em; max-height: 40vh; border: 1px solid #8884; }
 #plugin-settings .vertical-tab-content { overflow-wrap: anywhere; }
+.cm-word-object { display: inline-block; padding-inline: .4em; border: 1px solid GrayText; border-radius: .3em; font: .9em system-ui, sans-serif; color: CanvasText; background: Canvas; cursor: text; }
