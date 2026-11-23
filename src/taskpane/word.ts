@@ -1,3 +1,4 @@
+import { plainParagraphEdit, plainWordContent } from "./paragraph-edit";
 import { leftoverChecks } from "./markers";
 import type { MathOutputMode } from "../convert/mathimg";
 import {selectionMathAppearance,type MathAppearance,type MathAppearanceSource} from '../convert/math-appearance';
@@ -137,14 +138,23 @@ export interface ReadResult {
   notes: string[];
 }
 
+interface ParagraphBaseline {
+  markdown: string;
+  paragraphs: {id: string; text: string}[];
+}
+let paragraphBaseline: ParagraphBaseline | undefined;
+
 /** Read the current selection from Word as Obsidian-flavored markdown. */
 export async function readSelectionAsMarkdown(): Promise<ReadResult> {
+  paragraphBaseline = undefined;
   return Word.run(async (context) => {
     const loaded = await loadSidecar(context);
     const sidecar = loaded.sidecar;
     const selection = context.document.getSelection();
     const html = selection.getHtml();
-    selection.paragraphs.load("items/text,items/style,items/tableNestingLevel");
+
+    const supportsIds = Office.context.requirements.isSetSupported("WordApi", "1.6");
+    selection.paragraphs.load("items/text,items/style,items/tableNestingLevel" + (supportsIds ? ",items/uniqueLocalId" : ""));
     selection.inlinePictures.load("items");
     const selOoxml = selection.getOoxml();
     await context.sync();
@@ -218,6 +228,7 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     if (tableReport.unpaired) notes.push(`경고: 표 ${tableReport.unpaired}개를 HTML/OOXML과 짝지을 수 없어 원본 그대로 보존합니다`);
     if (mathReport.unpaired)
       notes.push(`경고: 수식 ${mathReport.unpaired}개를 변환하지 못했습니다(표 안 등). 적용 시 중단됩니다`);
+    if (supportsIds) paragraphBaseline = {markdown, paragraphs: paragraphs.map(p => ({id:p.uniqueLocalId, text:p.text}))};
     return { markdown, notes };
   });
 }
@@ -237,6 +248,40 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 export const regionSignature = (paragraphs: string[]) => `${paragraphs.length}:${hashId(paragraphs.map(norm).join("\n"))}`;
 let lastRegion: string | null = null;
 
+/** Explicit partial apply never falls through to whole-selection replacement. */
+export async function applyParagraphEdit(markdown: string): Promise<void> {
+  const base = paragraphBaseline;
+  if (!base) throw new Error("WordApi 1.6을 지원하는 Word에서 선택 영역을 먼저 불러오세요.");
+  const edit = plainParagraphEdit(base.markdown, markdown);
+  const matches = base.paragraphs.filter(p => p.text === edit.before);
+  if (matches.length !== 1) throw new Error("불러온 영역에서 대상 문단을 하나로 식별할 수 없습니다.");
+  const [original] = matches;
+  await Word.run(async context => {
+    const selection = context.document.getSelection();
+    selection.paragraphs.load("items/uniqueLocalId");
+    await context.sync();
+    const p = selection.paragraphs.items.find(candidate => candidate.uniqueLocalId === original.id);
+    if (!p) throw new Error("수정한 문단을 포함하는 영역을 다시 선택하세요.");
+    const range = p.getRange("Content");
+    const start = selection.getRange("Start").compareLocationWith(range.getRange("Start"));
+    const end = selection.getRange("End").compareLocationWith(range.getRange("End"));
+    const control = p.parentContentControlOrNullObject;
+    control.load("isNullObject");
+    p.load("text,tableNestingLevel,isListItem");
+    const xml = p.getOoxml();
+    await context.sync();
+    if (p.text !== original.text) throw new Error("Word에서 대상 문단이 바뀌었습니다. 다시 불러오세요.");
+    if (!["Before","Equal"].includes(start.value) || !["After","Equal"].includes(end.value) ||
+        !control.isNullObject || p.tableNestingLevel || p.isListItem || !plainWordContent(xml.value, original.text))
+      throw new Error("전체가 선택된 일반 텍스트 문단만 부분 적용할 수 있습니다.");
+    range.insertText(edit.after, Word.InsertLocation.replace);
+    await context.sync();
+    original.text = edit.after;
+    base.markdown = markdown;
+    lastRegion = regionSignature(base.paragraphs.map(item => item.text));
+  });
+}
+
 /** Replace the current selection in Word with the rendered markdown, restoring Word-only objects. */
 export async function replaceSelectionWithMarkdown(
   markdown: string,
@@ -247,6 +292,7 @@ export async function replaceSelectionWithMarkdown(
   return Word.run(async (context) => {
     // A collapsed selection (just a cursor) cannot be read (getHtml throws GeneralException), and replacing it would
     // insert the markdown next to the old content instead of replacing it.
+    paragraphBaseline = undefined;
     const sel0 = context.document.getSelection();
     sel0.load("isEmpty");
     sel0.paragraphs.load("items/text");

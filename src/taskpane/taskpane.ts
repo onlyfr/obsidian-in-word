@@ -102,7 +102,7 @@ function refreshPreferences(){
 async function withPaneLock<T>(action:()=>Promise<T>):Promise<T>{
   if(busy)throw new Error('다른 작업이 진행 중입니다. 완료 후 이관하세요.');
   busy=true;
-  const controls=[document.getElementById('load'),document.getElementById('apply'),mathOutput,mathSource,mathSize,mathColor,numbers,wrap,fontSize] as (HTMLButtonElement|HTMLSelectElement|HTMLInputElement)[];
+  const controls=[document.getElementById('load'),document.getElementById('apply'),document.getElementById('partial'),mathOutput,mathSource,mathSize,mathColor,numbers,wrap,fontSize] as (HTMLButtonElement|HTMLSelectElement|HTMLInputElement)[];
   controls.forEach(control=>control.disabled=true);
   try{return await action();}
   finally{busy=false;controls.forEach(control=>control.disabled=false);updateMathControls();}
@@ -132,6 +132,11 @@ Office.onReady((info) => {
       const { markdown, notes } = await readSelectionAsMarkdown();
       setDoc(markdown);
       return notes;
+    });
+  document.getElementById("partial")!.onclick = () =>
+    run("부분 적용", async () => {
+      const { applyParagraphEdit } = await loadWord();
+      await applyParagraphEdit(view.state.doc.toString());
     });
   document.getElementById("apply")!.onclick = () =>
     run("적용", async () => {

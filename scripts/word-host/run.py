@@ -134,6 +134,7 @@ def main():
     parser.add_argument('--settings-ui-only', action='store_true', help='Run actual task-pane settings tabs/editor/plugin UI checks without keyboard input')
     parser.add_argument('--transfer-only', action='store_true', help='Export synthetic settings from the real web task pane for native transfer tests')
     parser.add_argument('--community-only', action='store_true', help='Check live community catalog/release downloads and plugin UI without keys')
+    parser.add_argument('--partial-only', action='store_true', help='Check a single paragraph edit and one native Undo in a mixed document')
     parser.add_argument('--math-only', action='store_true', help='Run actual raster and math output mode checks without keyboard input')
     parser.add_argument('--identity-only', action='store_true', help='Run mixed object identity and selection-scope stability checks')
     parser.add_argument('--body-controls-only', action='store_true', help='Run native body preparation start/stop UI checks without keyboard input')
@@ -290,6 +291,12 @@ def main():
                 native_case('body-controls-lost-stop','body-controls-lost-stop.js')
                 (run/'body-controls-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
                 print(f'Body preparation controls passed. Evidence: {run}',flush=True)
+                return
+            if args.partial_only:
+                case('js','setup','setup.js')
+                case('com','add-float','add-float.ps1')
+                case('js','partial-edit','partial-edit.js')
+                case('com','partial-undo','partial-undo.ps1')
                 return
             if args.math_only:
                 case('js','setup','setup.js')
