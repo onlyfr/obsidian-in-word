@@ -72,11 +72,12 @@ function host(fail?: "equation" | "style" | "select") {
       customXmlParts: { getByNamespace: () => ({ items: [], load() {} }), add: addPart },
     },
   };
+  vi.stubGlobal("Office", {context:{requirements:{isSetSupported:() => false}}});
   (globalThis as any).Word = { run: (cb: any) => cb(context), InsertLocation: { replace: "Replace" } };
   return { calls, executed, insertHtml, addPart, boundary };
 }
 
-afterEach(() => { delete (globalThis as any).Word; });
+afterEach(() => { delete (globalThis as any).Word; vi.unstubAllGlobals(); });
 
 async function apply(markdown: string) {
   vi.resetModules();

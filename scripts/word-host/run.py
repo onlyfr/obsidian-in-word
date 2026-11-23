@@ -298,6 +298,7 @@ def main():
                 case('com','add-float','add-float.ps1')
                 case('js','partial-edit','partial-edit.js')
                 case('com','partial-undo','partial-undo.ps1')
+                case('js','word-text-conflicts','word-text-conflicts.js')
                 return
             if args.math_only:
                 case('js','setup','setup.js')

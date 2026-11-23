@@ -292,21 +292,33 @@ export async function replaceSelectionWithMarkdown(
   return Word.run(async (context) => {
     // A collapsed selection (just a cursor) cannot be read (getHtml throws GeneralException), and replacing it would
     // insert the markdown next to the old content instead of replacing it.
-    paragraphBaseline = undefined;
+    const base = paragraphBaseline;
+    const supportsIds = Office.context.requirements.isSetSupported("WordApi", "1.6");
+    const fields = supportsIds ? "items/text,items/uniqueLocalId" : "items/text";
     const sel0 = context.document.getSelection();
-    sel0.load("isEmpty");
-    sel0.paragraphs.load("items/text");
+    sel0.load("isEmpty,text");
+    sel0.paragraphs.load(fields);
     await context.sync();
     if (sel0.isEmpty)
       throw new Error(
         "선택 영역이 비어 있습니다 (커서만 있음). 바꿀 영역을 선택한 뒤 다시 누르세요 (방금 적용한 영역을 다시 선택하거나 '선택 영역 → 마크다운'으로 다시 불러오세요)",
       );
-    if (lastRegion !== null && regionSignature(sel0.paragraphs.items.map((p) => p.text)) !== lastRegion) {
-      const ok = confirm
-        ? await confirm("지금 선택한 영역이 마지막으로 불러오거나 적용한 영역과 다릅니다. 에디터의 마크다운으로 이 영역을 바꿀까요?")
-        : false;
-      if (!ok) throw new Error("적용을 취소했습니다: 선택 영역이 마지막으로 불러오거나 적용한 영역과 다릅니다 ('선택 영역 → 마크다운'으로 다시 불러오세요)");
+    // Copy the approved target before any confirmation or asynchronous math rendering.
+    const target = sel0.paragraphs.items.map(p => ({id:supportsIds ? p.uniqueLocalId : "", text:p.text}));
+    const selectedText = sel0.text;
+    const sameIds = base && target.length === base.paragraphs.length &&
+      target.every((p,i) => p.id === base.paragraphs[i].id);
+    let warning: string | undefined;
+    if (base) {
+      const previous = new Map(base.paragraphs.map(p => [p.id, p.text]));
+      const changed = target.findIndex(p => previous.has(p.id) && previous.get(p.id) !== p.text);
+      if (changed >= 0)
+        warning = `선택 영역의 ${changed+1}번째 문단 텍스트가 Word에서 바뀌었습니다. 전체를 적용하면 Word의 변경을 덮어씁니다. 다른 문단 한 곳만 편집했다면 취소 후 ‘한 문단만 적용’을 사용하세요. 전체를 바꿀까요?`;
     }
+    if (!warning && ((base && !sameIds) || (lastRegion !== null && regionSignature(target.map(p => p.text)) !== lastRegion)))
+      warning = "선택한 영역 또는 문단 구성이 달라졌습니다. 지금 선택한 영역 전체를 에디터 내용으로 바꿀까요?";
+    if (warning && !(confirm && await confirm(warning)))
+      throw new Error("적용을 취소했습니다. 편집한 한 문단만 적용하거나 Word에서 다시 불러오세요.");
     const loaded = await loadSidecar(context);
     const sidecar = loaded.sidecar;
     // Original OOXML of the tables the markdown refers to (stored gz-compressed in the sidecar).
@@ -327,8 +339,8 @@ export async function replaceSelectionWithMarkdown(
       throw new Error(
         `Word 개체 ${lost.length}개의 원본을 복원할 수 없어 적용을 중단했습니다. '선택 영역 → 마크다운'으로 다시 불러오세요`,
       );
-    const current = context.document.getSelection().getHtml();
-    const currentOoxml = context.document.getSelection().getOoxml();
+    const current = sel0.getHtml();
+    const currentOoxml = sel0.getOoxml();
     await context.sync();
     const tablesPresent = countTables(currentOoxml.value);
     if (tablesPresent > tables.length + opaqueTables)
@@ -386,8 +398,15 @@ export async function replaceSelectionWithMarkdown(
     context.trackedObjects.add(prev);
     context.trackedObjects.add(next);
     try {
+      selection.load("text");
+      selection.paragraphs.load(fields);
       await context.sync();
+      const final = selection.paragraphs.items;
+      if (selection.text !== selectedText || final.length !== target.length ||
+          final.some((p,i) => p.text !== target[i].text || (supportsIds && p.uniqueLocalId !== target[i].id)))
+        throw new Error("적용을 준비하는 동안 Word 원문 또는 선택 영역이 바뀌었습니다. 다시 확인하세요.");
       const wholeParagraphs = startCmp.value === "Equal" && endCmp.value === "Equal";
+      paragraphBaseline = undefined;
       const inserted = selection.insertHtml(html, Word.InsertLocation.replace);
       inserted.paragraphs.load("items/text");
       // Inline equations are marker words inside a paragraph: locate them (display ones are whole marker paragraphs).
@@ -486,7 +505,7 @@ export async function replaceSelectionWithMarkdown(
       }
 
       const after = context.document.getSelection();
-      after.paragraphs.load("items/text");
+      after.paragraphs.load(fields);
       await context.sync();
       lastRegion = regionSignature(after.paragraphs.items.map((p) => p.text));
 
@@ -497,6 +516,7 @@ export async function replaceSelectionWithMarkdown(
         loaded,
         new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]),
       );
+      if (supportsIds) paragraphBaseline = {markdown, paragraphs:after.paragraphs.items.map(p => ({id:p.uniqueLocalId,text:p.text}))};
       return { missing, notes: [...tableNotes, ...mathNotes, ...styleNotes] };
     } finally {
       prev.untrack();
