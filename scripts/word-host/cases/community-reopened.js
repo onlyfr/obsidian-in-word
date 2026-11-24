@@ -5,7 +5,6 @@ const wait=async(predicate,message)=>{const end=Date.now()+10000;while(Date.now(
 const row=()=>document.querySelector('[data-plugin-id="community-download-fixture"]');
 await wait(()=>row()?.textContent.includes('로드됨') && row().textContent.includes('2.0.0'),'downloaded enabled plugin restored after actual Word reopen');
 const {LocalDataStore}=await import('/src/plugins/storage.ts');must(new LocalDataStore().get('community-download-fixture').kept==='fixture-data','downloaded plugin settings persist after reopen');
-must(document.getElementById('community-connection-status').textContent.includes('미연결'),'helper connection/token not persisted');
 must(document.body.dataset.communityRuns==='1','restored plugin loaded once in new WebView');
 const buttons=()=>Array.from(row().querySelectorAll('button'));
 buttons().find(b=>b.textContent==='끄기').click();await wait(()=>buttons().some(b=>b.textContent==='켜기' && !b.disabled),'downloaded plugin can stop');

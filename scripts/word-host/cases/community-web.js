@@ -14,4 +14,5 @@ must(installed()?.querySelector('button').textContent==='켜기',status.textCont
 const version=installed().querySelector('.plugin-name').firstChild.textContent;
 [...installed().querySelectorAll('button')].find(b=>b.textContent==='삭제').click();
 await wait(()=>!installed(),'cleanup');
+document.getElementById('close-settings').click();
 return {browserOnly:true,version};

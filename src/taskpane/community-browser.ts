@@ -1,5 +1,5 @@
 import {downloadCommunityPlugin,fetchCommunityCatalog,searchCommunityPlugins,type CommunityPlugin,type CommunityAssetReader} from '../plugins/community';
-import {connectCommunityDownloader,connectWindowsHost} from '../plugins/community-connection';
+import {connectWindowsHost} from '../plugins/community-connection';
 import type {StoredPlugin} from '../plugins/storage';
 
 const PAGE_SIZE=20;
@@ -16,7 +16,6 @@ export function initCommunityBrowser(options:{
   const load=get<HTMLButtonElement>('community-load'),search=get<HTMLInputElement>('community-search');
   const status=get('community-status'),results=get('community-results'),pages=get('community-pages');
   const previous=get<HTMLButtonElement>('community-prev'),next=get<HTMLButtonElement>('community-next');
-  const connection=get<HTMLInputElement>('community-connection'),connect=get<HTMLButtonElement>('community-connect'),disconnect=get<HTMLButtonElement>('community-disconnect');
   const native=!!document.querySelector('meta[name="oiw-windows-host"][content="1"]');
   const reconnect=get<HTMLButtonElement>('community-reconnect');
   let readAsset:CommunityAssetReader|undefined;
@@ -24,8 +23,6 @@ export function initCommunityBrowser(options:{
   const render=()=>{
     load.disabled=fetching || busy;load.textContent=hasCatalog?'목록 새로고침':'공식 목록 불러오기';
     reconnect.disabled=busy;
-    connect.disabled=disconnect.disabled=connection.disabled=busy;
-    if(!busy)disconnect.disabled=!readAsset;
     search.disabled=!hasCatalog;
     const filtered=searchCommunityPlugins(catalog,search.value);
     const totalPages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE));page=Math.min(page,totalPages-1);
@@ -64,16 +61,9 @@ export function initCommunityBrowser(options:{
     finally{fetching=false;render();}
   };
   search.oninput=()=>{page=0;render();};
-  connect.onclick=()=>options.runOperation(async()=>{
-    const info=get('community-connection-status');info.textContent='도우미에 연결하는 중…';readAsset=undefined;
-    try{readAsset=await connectCommunityDownloader(connection.value);connection.value='';info.textContent='도우미 연결됨 · 다운로드할 수 있습니다.';}
-    catch(error){info.textContent=`연결 실패: ${(error as Error).message}`;}
-  });
-  disconnect.onclick=()=>{readAsset=undefined;connection.value='';get('community-connection-status').textContent='도우미 연결 해제됨 · 작업창에서 다운로드합니다.';render();};
   previous.onclick=()=>{page=Math.max(0,page-1);render();};next.onclick=()=>{page++;render();};
   render();
   if(native){
-    connection.closest('details')!.hidden=true;
     reconnect.hidden=false;
     const connectApp=()=>options.runOperation(async()=>{
       readAsset=undefined;

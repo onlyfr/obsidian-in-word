@@ -1,6 +1,6 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {downloadCommunityPlugin,fetchCommunityCatalog,parseCommunityCatalog,releaseManifest,searchCommunityPlugins} from '../src/plugins/community';
-import {connectCommunityDownloader,connectWindowsHost} from '../src/plugins/community-connection';
+import {connectWindowsHost} from '../src/plugins/community-connection';
 
 const item={id:'example',name:'Example',author:'Maker',description:'Math editor tools',repo:'maker/example'};
 const release={tag_name:'1.2.3',draft:false,prerelease:false,assets:[{id:1,name:'manifest.json',size:100},{id:2,name:'main.js',size:100}]};
@@ -49,17 +49,18 @@ it('reports API limits and enforces streamed catalog size even without Content-L
  const stream=new ReadableStream({start(controller){controller.enqueue(new Uint8Array(8*1024*1024+1));controller.close();}});
  await expect(fetchCommunityCatalog(async()=>new Response(stream))).rejects.toThrow('크기');
 });
-it('accepts only explicit loopback connection codes and uses session authorization',async()=>{
- const fetcher=vi.fn(async(url:string,options:RequestInit)=>url.endsWith('/status')?json({protocol:1}):new Response('bundle'));
+it('uses the current Windows session for asset downloads',async()=>{
+ const marker=document.createElement('meta');marker.name='oiw-windows-host';marker.content='1';document.head.append(marker);
+ vi.stubGlobal('location',{origin:'https://localhost:49175'});
+ const fetcher=vi.fn(async(url:string,options:RequestInit)=>url==='/host-session'?json({protocol:1,capabilities:{downloads:true},token:'a'.repeat(64)}):url.endsWith('/status')?json({protocol:1}):new Response('bundle'));
  vi.stubGlobal('fetch',fetcher);
- for(const value of ['https://evil.test/#'+ 'a'.repeat(64),'http://127.0.0.1:3000/path#'+'a'.repeat(64),'http://user@127.0.0.1:3000/#'+'a'.repeat(64)])
-   await expect(connectCommunityDownloader(value)).rejects.toThrow();
- expect(fetcher).not.toHaveBeenCalled();
- const reader=await connectCommunityDownloader('http://127.0.0.1:12345/#'+'a'.repeat(64));
- expect(await reader('example','maker/example',123,1024)).toBe('bundle');
- const [,options]=fetcher.mock.calls[1];expect(options.credentials).toBe('omit');
+ const reader=await connectWindowsHost();
+ expect(await reader!('example','maker/example',123,1024)).toBe('bundle');
+ const [url,options]=fetcher.mock.calls[2];expect(url).toBe('https://localhost:49175/asset');
+ expect(options.headers).toMatchObject({Authorization:'Bearer '+'a'.repeat(64)});
  expect(JSON.parse(options.body as string)).toEqual({id:'example',repo:'maker/example',assetId:123,maxBytes:1024});
 });
+
 it('rejects same-size altered bytes from the web relay before reading plugin code',async()=>{
  const original=new TextEncoder().encode(JSON.stringify({id:item.id,name:item.name,version:'1.2.3'}));
  const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',original));

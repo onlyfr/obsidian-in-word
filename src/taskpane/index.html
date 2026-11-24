@@ -76,12 +76,6 @@
           <p class="option-help">공식 Obsidian 목록은 바로 검색할 수 있습니다. 별도 연결 없이 다운로드할 때는 gh-proxy.com에서 공개 릴리스 파일을 받아 GitHub의 SHA-256과 대조합니다. Windows 앱 연결이 있으면 앱에서 직접 받습니다. GitHub 정식 릴리스를 내려받은 뒤 설치 목록의 ‘켜기’로 적용합니다. Obsidian 전용 API·Node/Electron·보관함 기능은 지원되지 않을 수 있습니다.</p>
           <p id="community-status" role="status" aria-live="polite">목록을 불러와 검색할 수 있습니다.</p>
           <button id="community-reconnect" type="button" hidden>Windows 앱 다시 연결</button>
-          <details><summary>Windows 앱 / 기존 도우미 연결</summary>
-            <p class="option-help"><a href="https://github.com/onlyfr/obsidian-in-word/actions/workflows/windows-build.yml" target="_blank" rel="noopener noreferrer">Windows 앱 받기</a> → 압축을 풀고 ObsidianInWord.exe를 실행한 뒤 ‘Word 연결 설정’을 누르세요. Word에서 앱의 작업창을 사용하면 연결 주소가 필요 없습니다. 아래 입력은 기존 다운로드 도우미 사용자용입니다.</p>
-            <label class="option-row" for="community-connection">연결 주소<input id="community-connection" type="password" autocomplete="off" placeholder="도우미 창에서 복사한 주소" /></label>
-            <button id="community-connect" type="button">연결</button><button id="community-disconnect" type="button" disabled>연결 해제</button>
-            <p id="community-connection-status" role="status">도우미 미연결 · 목록 검색은 사용할 수 있습니다.</p>
-          </details>
           <div id="community-results"></div>
           <div class="community-pages" hidden id="community-pages"><button id="community-prev" type="button">이전</button><span id="community-page"></span><button id="community-next" type="button">다음</button></div>
         </fieldset>

@@ -193,23 +193,11 @@ def main():
         env['WORD_BODY_NATIVE_TOKEN'] = native_token
     if args.native_selection_only or args.native_format_only or args.body_controls_only or args.body_check_only:
         env['WORD_BODY_OWNERSHIP_MODE'] = '1'
-    server = word = downloader = None
+    server = word = None
     registered = False
     results = []
     with (run / 'server.log').open('w', encoding='utf-8') as server_log, (run / 'word.log').open('w', encoding='utf-8') as word_log:
         try:
-            if args.community_only:
-                project=REPO/'native/plugin-downloader/WordPluginDownloader.csproj'
-                subprocess.run(['dotnet','build',str(project),'-c','Release','--nologo'],check=True)
-                downloader=subprocess.Popen([str(project.parent/'bin/Release/net10.0-windows/WordPluginDownloader.exe'),
-                    '--allow-origin',f'https://localhost:{port}','--connection-file',str(run/'downloader-connection.json')],
-                    stdout=server_log,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW)
-                deadline=time.monotonic()+20
-                while not (run/'downloader-connection.json').exists():
-                    if downloader.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Native downloader failed to start')
-                    time.sleep(.1)
-                boundary=subprocess.run(['python',str(project.parent/'check-boundary.py'),str(run/'downloader-connection.json'),f'https://localhost:{port}'],check=True,capture_output=True,text=True)
-                (run/'downloader-boundary.json').write_text(boundary.stdout,encoding='utf-8')
             subprocess.run(['node', str(settings / 'cli.js'), 'register', str(manifest)], check=True)
             registered = True
             server = subprocess.Popen(['node', str(SCRIPTS / 'server.mjs')], cwd=REPO, env=env, stdout=server_log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -346,10 +334,8 @@ def main():
                 return
             if args.community_only:
                 case('js','setup','setup.js')
-                connection=json.loads((run/'downloader-connection.json').read_text(encoding='utf-8'))['connection']
-                command(run,'js','community-connect','globalThis.communityConnection='+json.dumps(connection)+';return true;',worker=word)
-                case('js','community-download','community-download.js')
                 case('js','settings-ui','settings-ui.js')
+                case('js','community-web','community-web.js')
                 case('js','community-ui','community-ui.js')
                 case('com','community-reopen','session-reopen.ps1')
                 case('js','community-reopened','community-reopened.js')
@@ -548,9 +534,6 @@ def main():
             summarize(run, results)
             print(f'All Word acceptance cases passed. Report: {run / "report.md"}', flush=True)
         finally:
-            if downloader is not None:
-                downloader.terminate()
-                downloader.wait(timeout=10)
             if word is not None and word.poll() is None:
                 try:
                     command(run, 'com', 'close', '$true', 15)
