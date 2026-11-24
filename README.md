@@ -50,7 +50,7 @@ Windows 데스크톱 Word에서 검증 중인 PoC입니다. 선택 영역의 마
 
 ### Windows 앱으로 사용
 
-[Windows x64 앱 ZIP](https://onlyfr.github.io/obsidian-in-word/downloads/obsidian-in-word-windows.zip)을 풀고 **ObsidianInWord.exe → Word 연결 설정 → Word 열기** 순서로 시작합니다. Word의 추가 기능 목록에서 **Obsidian in Word (Windows)** 를 여세요. 처음 설정할 때 현재 사용자용 localhost 인증서와 Word 애드인을 등록합니다.
+최신 Windows 빌드는 [Windows build](https://github.com/onlyfr/obsidian-in-word/actions/workflows/windows-build.yml)의 성공한 실행에서 **Artifacts → windows-app**으로 받을 수 있습니다. 기존 [마지막 Pages 배포본 ZIP](https://onlyfr.github.io/obsidian-in-word/downloads/obsidian-in-word-windows.zip)을 풀고 **ObsidianInWord.exe → Word 연결 설정 → Word 열기** 순서로 시작합니다. Word의 추가 기능 목록에서 **Obsidian in Word (Windows)** 를 여세요. 처음 설정할 때 현재 사용자용 localhost 인증서와 Word 애드인을 등록합니다.
 
 편집기와 수식 렌더러는 EXE에 포함되고 플러그인 다운로드도 같은 앱에서 처리합니다. 실행에는 npm·Node·별도 .NET 런타임·GitHub Pages가 필요 없습니다. Office.js 및 커뮤니티 조회에는 인터넷이 필요합니다. 창을 닫으면 알림 영역에서 실행되며 **앱 종료**로 연결을 끝냅니다. [사용·해제·개발 안내](native/windows-host/README.md), [검증](docs/testing/2026-11-08-windows-app.md).
 
@@ -99,7 +99,7 @@ npm run test:word # 실제 Windows Word 자동 인수 시험 (사전 설정: scr
 4. 다른 영역을 선택하면 교체 확인을 묻고, 커서만 있는 선택은 적용을 거부합니다. 실패 안내가 나오면 아래 실행 취소 안내를 따르세요.
 
 ### 로컬 서버 없이 사용 (GitHub Pages)
-`main`에 푸시하면 GitHub Actions가 테스트·빌드를 거쳐 [GitHub Pages](https://onlyfr.github.io/obsidian-in-word/)에 정적 파일로 배포합니다. 이 경우 로컬 서버나 인증서 없이 `manifest.prod.xml`을 Word에 사이드로드하면 됩니다. 코드는 Word 작업창 안에서 실행됩니다.
+기존 웹 작업창은 [마지막 GitHub Pages 배포본](https://onlyfr.github.io/obsidian-in-word/)을 사용합니다. Pages 자동 배포는 종료했습니다. 이 경우 로컬 서버나 인증서 없이 `manifest.prod.xml`을 Word에 사이드로드하면 됩니다. 코드는 Word 작업창 안에서 실행됩니다.
 
 사전 설정: 저장소 Settings → Pages → Source를 **GitHub Actions**로 지정해야 합니다.
 
