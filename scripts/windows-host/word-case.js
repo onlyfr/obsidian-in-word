@@ -22,4 +22,33 @@ const item={id:'url-into-selection',repo:'denolehov/obsidian-url-into-selection'
 const release=await(await fetch(`https://api.github.com/repos/${item.repo}/releases/latest`)).json();const file=release.assets.find(a=>a.name==='manifest.json');
 const received=await fetch('/asset',{method:'POST',headers:{Authorization:'Bearer '+session.token,'Content-Type':'application/json'},body:JSON.stringify({...item,assetId:file.id,maxBytes:65536})});
 must(received.ok && (await received.json()).id===item.id,'integrated native download works');
-return {bundledUi:true,automaticConnection:true,wordLoadApply:true,math:true,boldRoundTrip:true,assetAuthorization:true,liveDownload:true};
+document.getElementById('open-settings').click();
+document.getElementById('plugins-tab').click();
+document.getElementById('community-load').click();
+const search=document.getElementById('community-search'),status=document.getElementById('community-status');
+await wait(()=>!search.disabled || status.textContent.includes('못했습니다'),'catalog settled');
+must(!search.disabled,status.textContent);
+const probeId=['obsidian-latex-suite','url-into-selection'].find(id=>!document.querySelector('[data-plugin-id="'+id+'"]'));
+must(probeId,'test needs one uninstalled fixture plugin');
+search.value=probeId;search.dispatchEvent(new Event('input'));
+const button=document.querySelector('[data-community-id="'+probeId+'"] button');
+must(button && !button.disabled,'real download button enabled');
+const reconnect=document.getElementById('community-reconnect'),originalFetch=window.fetch;
+try {
+ window.fetch=(url,...args)=>url==='/host-session'?Promise.reject(new Error('test disconnect')):originalFetch.call(window,url,...args);
+ reconnect.click();
+ await wait(()=>status.textContent.includes('Windows 앱 연결 실패'),'failed connection visible');
+ must(document.querySelector('[data-community-id="'+probeId+'"] button').disabled,'offline download disabled');
+} finally {window.fetch=originalFetch;}
+reconnect.click();
+await wait(()=>!document.querySelector('[data-community-id="'+probeId+'"] button').disabled,'reconnect enables download without reloading Word');
+document.querySelector('[data-community-id="'+probeId+'"] button').click();
+await wait(()=>/완료|실패/.test(status.textContent),'download finished');
+must(status.textContent.includes('다운로드 완료'),status.textContent);
+const row=document.querySelector('[data-plugin-id="'+probeId+'"]');
+must(row && row.querySelector('button').textContent==='켜기','download installed disabled');
+const version=row.querySelector('.plugin-name').firstChild.textContent;
+[...row.querySelectorAll('button')].find(b=>b.textContent==='삭제').click();
+await wait(()=>!document.querySelector('[data-plugin-id="'+probeId+'"]'),'remove only test installation');
+document.getElementById('close-settings').click();
+return {bundledUi:true,automaticConnection:true,wordLoadApply:true,math:true,boldRoundTrip:true,assetAuthorization:true,liveDownload:true,uiDownload:version};
