@@ -115,21 +115,19 @@ internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<
         var xml = XDocument.Load(source);XNamespace ns = "http://schemas.microsoft.com/office/appforoffice/1.1";
         xml.Root!.Element(ns + "Id")!.Value = WordSetup.Id;
         xml.Root.Element(ns + "DisplayName")!.SetAttributeValue("DefaultValue", "Obsidian in Word (Windows)");
-        xml.Descendants(ns + "SourceLocation").Single().SetAttributeValue("DefaultValue", HostServer.Origin + "/index.html");
-        xml.Root.Element(ns + "Version")!.Value = "0.0.2.0";
+        var paneUrl = key is null ? HostServer.Origin + "/index.html" : "https://localhost:49176/open/" + key;
+        xml.Descendants(ns + "SourceLocation").Single().SetAttributeValue("DefaultValue", paneUrl);
+        xml.Root.Element(ns + "Version")!.Value = key is null ? "0.0.2.0" : "1.0.0.0";
         using var ribbon = Assembly.GetExecutingAssembly().GetManifestResourceStream("host-ribbon.xml")!;
         xml.Root.Add(XElement.Load(ribbon));
         if (key is not null)
         {
             if (!Guid.TryParseExact(key,"N",out _)) throw new InvalidOperationException("Word 시작 설정을 다시 설치하세요.");
-            var launch = "https://localhost:49176/open/" + key;
             xml.Root.Element(ns + "Hosts")!.AddBeforeSelf(new XElement(ns + "AppDomains", new XElement(ns + "AppDomain", HostServer.Origin)));
-            xml.Descendants(ns + "SourceLocation").Single().SetAttributeValue("DefaultValue",launch);
             XNamespace bt = "http://schemas.microsoft.com/office/officeappbasictypes/1.0";
-            xml.Descendants(bt+"Url").Single().SetAttributeValue("DefaultValue",launch);
+            xml.Descendants(bt+"Url").Single().SetAttributeValue("DefaultValue",paneUrl);
             foreach (var image in xml.Descendants(bt+"Image").Where(x=>x.Attribute("DefaultValue")!=null))
                 image.SetAttributeValue("DefaultValue","https://localhost:49176/"+Path.GetFileName((string)image.Attribute("DefaultValue")!));
-            xml.Root.Element(ns+"Version")!.Value="1.0.0.0";
             xml.Root.Element(ns+"AppDomains")!.AddBeforeSelf(
                 new XElement(ns+"IconUrl",new XAttribute("DefaultValue","https://localhost:49176/icon32.png")),
                 new XElement(ns+"SupportUrl",new XAttribute("DefaultValue","https://github.com/onlyfr/obsidian-in-word/issues")));

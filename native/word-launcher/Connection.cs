@@ -111,7 +111,8 @@ namespace ObsidianInWord.Launcher
                     }
                     var key = File.ReadAllText(Path.Combine(Settings, "launch-key")).Trim();
                     if (key.Length != 32 || path != "/open/" + key) { Reply(ssl,"404 Not Found","",0); return; }
-                    if (!Ready(cert))
+                    var ready = Ready(cert);
+                    if (!ready)
                     {
                         lock (launchLock)
                         {
@@ -123,9 +124,13 @@ namespace ObsidianInWord.Launcher
                             }
                         }
                         var watch = Stopwatch.StartNew();
-                        while (!Ready(cert) && watch.ElapsedMilliseconds < 8000 && !token.IsCancellationRequested) Thread.Sleep(80);
+                        while (watch.ElapsedMilliseconds < 8000 && !token.IsCancellationRequested)
+                        {
+                            ready = Ready(cert);
+                            if (ready || token.WaitHandle.WaitOne(80)) break;
+                        }
                     }
-                    if (!Ready(cert)) { Reply(ssl,"503 Service Unavailable","",0); return; }
+                    if (!ready || token.IsCancellationRequested) { Reply(ssl,"503 Service Unavailable","",0); return; }
                     var query = first[1].Substring(path.Length);
                     if (Array.Exists(query.ToCharArray(), c => c < 33 || c == 127)) return;
                     Reply(ssl, "307 Temporary Redirect", "Location: https://localhost:49175/index.html" + query + "\r\nReferrer-Policy: no-referrer\r\n", 0);

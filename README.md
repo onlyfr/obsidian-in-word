@@ -9,7 +9,7 @@ Windows용 Microsoft Word에서 선택한 문단을 **Obsidian 스타일 마크�
 3. 앱에서 **Word 연결 설정**을 누릅니다. 처음 한 번 현재 Windows 사용자에게 로컬 연결용 인증서와 Word 추가 기능을 등록합니다. 인증서 신뢰 확인창이 뜨면 내용을 확인하세요.
 4. **Word 열기**를 누르고 Word의 **홈 또는 삽입 → 추가 기능 → 내 추가 기능**에서 **Obsidian in Word (Windows)**를 엽니다. 목록에 보이지 않으면 문서를 저장하고 Word를 다시 시작하세요.
 
-Windows x64용 휴대용 앱에 편집기가 포함되어 있어 Node.js나 npm 설치가 필요 없습니다. 64비트 Word에서는 설정 후 작업창을 열면 앱이 자동으로 시작되고 마지막 Word를 종료하면 함께 종료됩니다. 홈 탭의 **Obsidian in Word** 버튼이 아직 없는 새 문서는 **추가 기능 → Obsidian in Word (Windows)**에서 먼저 선택하세요. EXE를 옮겼다면 새 위치에서 **Word 연결 설정**을 다시 누르세요. Microsoft의 Office.js 로드와 커뮤니티 플러그인 조회·다운로드에는 인터넷 연결이 필요합니다. [연결 상태·등록 해제 안내](native/windows-host/README.md)
+Windows x64용 휴대용 앱에 편집기가 포함되어 있어 Node.js나 npm 설치가 필요 없습니다. 64비트 Word에서는 설정 후 작업창을 열면 앱이 자동으로 시작되고 마지막 Word를 종료하면 함께 종료됩니다. 홈 탭의 **Obsidian in Word** 버튼이 아직 없는 새 문서는 **추가 기능 → Obsidian in Word (Windows)**에서 먼저 선택하세요. 작업창 연결이 끊겼다면 작업창을 닫고 같은 버튼으로 다시 여세요. EXE를 옮겼다면 새 위치에서 **Word 연결 설정**을 다시 누르세요. Microsoft의 Office.js 로드와 커뮤니티 플러그인 조회·다운로드에는 인터넷 연결이 필요합니다. [연결 상태·등록 해제 안내](native/windows-host/README.md)
 
 ## 문서 편집하기
 

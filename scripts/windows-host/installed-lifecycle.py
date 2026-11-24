@@ -1,4 +1,6 @@
 """Exercise the installed Windows product from a blank Word document (real ribbon, no test server)."""
+import http.client
+import os
 import socket
 import subprocess
 import time
@@ -38,6 +40,15 @@ try:
     subprocess.run(ribbon, check=True, timeout=50)
     wait_for(lambda: listening(49175) and running("ObsidianInWord.exe"), 20, "Editor did not start")
     subprocess.run([*ribbon, "-CheckEditor"], check=True, timeout=35)
+    key = (Path(os.environ["LOCALAPPDATA"]) / "ObsidianInWord" / "launch-key").read_text().strip()
+    warm = http.client.HTTPSConnection("localhost", 49176, timeout=10)
+    try:
+        warm.request("GET", "/open/" + key + "?reopen=1")
+        response = warm.getresponse()
+        assert response.status == 307, "Running editor was unavailable on reconnect"
+        assert response.getheader("Location") == "https://localhost:49175/index.html?reopen=1"
+    finally:
+        warm.close()
     word.Documents.Add()
     doc.Close(0)
     time.sleep(3)
