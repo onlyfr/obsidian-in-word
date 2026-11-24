@@ -14,7 +14,7 @@ import {
   type TableReport,
 } from "../convert/obsidian";
 import { equationPackage, mathIds, mathImgIds, scanOoxml, wrapPackage } from "../convert/equations";
-import { TABLE_MARKER_RE, countTables, scanTables, tableRels } from "../convert/tables";
+import { TABLE_MARKER_RE, countTables, scanTables, tableRelationships } from "../convert/tables";
 
 /** Sidecar ids of the markdown tables (`<!-- word:table id=... -->`). */
 const tableIds = (markdown: string) =>
@@ -201,7 +201,8 @@ export async function readSelectionAsMarkdown(acceptResult: () => boolean = () =
         await context.sync();
       }
     }
-    const tableCaps = await Promise.all(tableRaw.map(async(raw,index) => ({raw,gz:await gz(raw),rels:tableRels(raw,selOoxml.value),
+    const relationships = tableRelationships(tableRaw,selOoxml.value);
+    const tableCaps = await Promise.all(tableRaw.map(async(raw,index) => ({raw,gz:await gz(raw),rels:relationships[index],
       ...(tablePackages[index]?.value?{pkg:await gz(tablePackages[index]!.value),mathCount:mathCounts[index]}:{})})));
     const markdown = htmlToMarkdown(
       html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport,

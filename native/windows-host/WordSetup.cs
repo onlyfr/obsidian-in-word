@@ -40,6 +40,24 @@ internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<
         try { return XNode.DeepEquals(XDocument.Parse(manifest).Root, XDocument.Parse(BuildManifest()).Root); }
         catch (System.Xml.XmlException) { return false; }
     }
+    // Return the certificate only when the host can use it. Reading startup status never repairs registration.
+    internal X509Certificate2? CheckConnection(out string message)
+    {
+        var registration = store.Registration;
+        if (registration is not null && registration != manifestPath)
+            message = "다른 Word 등록이 같은 추가 기능 ID를 사용합니다. 등록 경로를 확인하세요.";
+        else if (registration is null && store.Thumbprint is null && store.Manifest is null && store.Pending is null)
+            message = "처음 사용: Word 연결 설정을 누르세요.";
+        else if (!Registered())
+            message = "Word 등록 또는 매니페스트를 확인할 수 없습니다. Word 연결 설정을 다시 실행하세요.";
+        else
+        {
+            var cert = FindCertificate();
+            if (cert is not null) { message = store.Pending is null ? "" : "\n이전 인증서 정리를 마치려면 Word 연결 설정을 다시 실행하세요."; return cert; }
+            message = "연결 인증서가 없거나 갱신·신뢰 확인이 필요합니다. Word 연결 설정을 다시 실행하세요.";
+        }
+        return null;
+    }
     internal void Install()
     {
         var previousRegistration = store.Registration;
@@ -107,8 +125,7 @@ internal static class WordSetup
     internal static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ObsidianInWord");
     internal static string ManifestPath => Path.Combine(DirectoryPath, "manifest.windows.xml");
     private static readonly SetupManager Manager = new(new WindowsSetupStore(), ManifestPath, () => CreateCertificate());
-    internal static X509Certificate2? FindCertificate() => Manager.FindCertificate();
-    internal static bool Registered() => Manager.Registered();
+    internal static X509Certificate2? CheckConnection(out string message) => Manager.CheckConnection(out message);
     internal static void Install() => Manager.Install();
     internal static void Remove() => Manager.Remove();
     internal static X509Certificate2 CreateCertificate(bool persistKey = true)

@@ -12,7 +12,7 @@ import {
   normalizeIds,
   scanTables,
   tableId,
-  tableRels,
+  tableRelationships,
   type TableModel,
 } from "../src/convert/tables";
 import { wrapPackage } from "../src/convert/equations";
@@ -22,7 +22,10 @@ import { wrapPackage } from "../src/convert/equations";
 const html = readFileSync("tests/fixtures/tables-getHtml.html", "utf8");
 const pkg = readFileSync("tests/fixtures/tables-ooxml.xml", "utf8");
 
-const caps = () => scanTables(pkg).map((raw) => ({ raw, gz: "gz:" + raw.length, rels: tableRels(raw, pkg) }));
+const caps = () => {
+  const raws=scanTables(pkg), rels=tableRelationships(raws,pkg);
+  return raws.map((raw,i)=>({raw,gz:"gz:"+raw.length,rels:rels[i]}));
+};
 const load = () => {
   const sidecar = new MemorySidecar();
   const report: TableReport = { total: 0, simple: 0, opaque: 0, unpaired: 0, reasons: {} };
@@ -55,8 +58,16 @@ describe("OOXML tables (real Word shape)", () => {
   });
   it("hyperlink relationships are carried along", () => {
     const raws = scanTables(pkg);
-    expect(tableRels(raws[3], pkg)).toContain('Target="https://example.com/p"');
-    expect(tableRels(raws[0], pkg)).toBe("");
+    expect(tableRelationships(raws,pkg)[3]).toContain('Target="https://example.com/p"');
+    expect(tableRelationships(raws,pkg)[0]).toBe("");
+  });
+  it("resolves shared hyperlink IDs once per table, only from the document part", () => {
+    const table='<w:hyperlink r:id="rId1"/>';
+    const link='<Relationship Id="rId1" Type="a/hyperlink" Target="body"/>';
+    const header='<pkg:part pkg:name="/word/_rels/header1.xml.rels">'+link.replace('body','header')+'</pkg:part>';
+    const body='<pkg:part pkg:name="/word/_rels/document.xml.rels">'+link+'</pkg:part>';
+    expect(tableRelationships([table+table,table,""],'<pkg:package>'+header+body+'</pkg:package>')).toEqual([link,link,""]);
+    expect(tableRelationships([table],'<pkg:package>'+header+'</pkg:package>')).toEqual([""]);
   });
   it("ids ignore the noise Word adds per call, not the content", () => {
     const raw = scanTables(pkg)[0];

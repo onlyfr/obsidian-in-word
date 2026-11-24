@@ -31,8 +31,8 @@ internal static class Program
         { try { await operations.TryRun(action); } catch (Exception error) { status.Text = "작업 실패: " + error.Message; } }
         async Task Start()
         {
-            try { certificate = WordSetup.FindCertificate();if (certificate is null || !WordSetup.Registered()) { certificate?.Dispose();certificate = null;status.Text = "처음 사용: Word 연결 설정이 필요합니다.";return; }
-                host = HostServer.Build(certificate);await host.StartAsync();status.Text = "연결 준비됨 · 편집기와 플러그인 다운로드를 이 앱에서 제공합니다.\nWord가 이미 열려 있었다면 앱 등록을 표시하기 위해 Word를 다시 열어야 할 수 있습니다."; }
+            try { certificate = WordSetup.CheckConnection(out var message);if (certificate is null) { status.Text = message;return; }
+                host = HostServer.Build(certificate);await host.StartAsync();status.Text = "연결 준비됨 · 편집기와 플러그인 다운로드를 이 앱에서 제공합니다.\nWord가 이미 열려 있었다면 앱 등록을 표시하기 위해 Word를 다시 열어야 할 수 있습니다." + message; }
             catch (Exception error){await Stop();status.Text = "시작 실패: " + error.Message;}
         }
         setup.Click += async (_, _) => await Run(async () => { await Stop();try { WordSetup.Install(); } catch { await Start();throw; }await Start(); });

@@ -9,6 +9,16 @@ void Test(string name, Action action) { action();checks.Add(name); }
 const string path = "owned-manifest";
 SetupManager Manager(FakeStore store) => new(store, path, () => WordSetup.CreateCertificate(false));
 
+Test("startup distinguishes first use, conflicting registration, damaged manifest and expired certificate", () => {
+    using var store = new FakeStore();var manager = Manager(store);
+    Must(manager.CheckConnection(out var message) is null && message.Contains("처음 사용"), "first use");
+    store.RegistrationValue = "foreign";
+    Must(manager.CheckConnection(out message) is null && message.Contains("같은 추가 기능 ID") && store.RegistrationValue == "foreign", "foreign registration");
+    using var expired = FakeStore.Expired();store.Seed(expired);
+    Must(manager.CheckConnection(out message) is null && message.Contains("인증서"), "expiry");
+    store.Manifest = "damaged";
+    Must(manager.CheckConnection(out message) is null && message.Contains("매니페스트") && store.Manifest == "damaged", "manifest");
+});
 Test("new install, repeat and owned removal", () => {
     using var store = new FakeStore();var manager = Manager(store);manager.Install();var thumb = store.Thumbprint;
     Must(manager.Registered() && manager.FindCertificate() is not null && store.Pending is null, "new install");

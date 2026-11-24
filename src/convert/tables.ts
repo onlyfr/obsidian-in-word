@@ -58,16 +58,36 @@ export function normalizeIds(xml: string): string {
     .replace(/\sr:id="[^"]*"/g, ""); // relationship ids differ per getOoxml call; the target is in `rels`
 }
 
-/** `<Relationship>` markup for the relationship ids a table refers to (hyperlinks), from the package's rels part. */
-export function tableRels(raw: string, ooxml: string): string {
-  const ids = new Set(Array.from(raw.matchAll(/\sr:id="([^"]+)"/g), (m) => m[1]));
-  if (!ids.size) return "";
-  const out: string[] = [];
-  for (const m of ooxml.matchAll(/<Relationship\b[^>]*\/>/g)) {
-    const id = /\sId="([^"]+)"/.exec(m[0])?.[1];
-    if (id && ids.has(id) && /\/hyperlink"/.test(m[0])) out.push(m[0]);
+/** Resolve all top-level tables against the main document relationship part once.
+ * Relationship IDs are local to a part: a header can reuse a body hyperlink's ID.
+ */
+export function tableRelationships(tables: readonly string[], ooxml: string): string[] {
+  const result = tables.map(() => "");
+  const owners = new Map<string, number[]>();
+  tables.forEach((raw, index) => {
+    const ids = new Set(Array.from(raw.matchAll(/\sr:id="([^"]+)"/g), match => match[1]));
+    for (const id of ids) {
+      const indices = owners.get(id);
+      if (indices) indices.push(index);
+      else owners.set(id, [index]);
+    }
+  });
+  if (!owners.size) return result;
+  let relationships = ooxml;
+  if (ooxml.includes("<pkg:package")) {
+    const part = /<pkg:part\b[^>]*\spkg:name="\/word\/_rels\/document\.xml\.rels"[^>]*>/.exec(ooxml);
+    if (!part) return result;
+    const start = part.index + part[0].length;
+    const end = ooxml.indexOf("</pkg:part>", start);
+    if (end < 0) return result;
+    relationships = ooxml.slice(start, end);
   }
-  return out.join("");
+  for (const [markup] of relationships.matchAll(/<Relationship\b[^>]*\/>/g)) {
+    if (!/\/hyperlink"/.test(markup)) continue;
+    const id = /\sId="([^"]+)"/.exec(markup)?.[1];
+    if (id) for (const index of owners.get(id) ?? []) result[index] += markup;
+  }
+  return result;
 }
 
 export const tableId = (rawOoxml: string) => hashId("tbl:" + normalizeIds(rawOoxml));
