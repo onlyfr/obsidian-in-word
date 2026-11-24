@@ -23,5 +23,11 @@ export function observeNativeBodyBridge(listener:(value:NativeBodyBridge|null)=>
 export function installNativeBodyBridge(value:NativeBodyBridge):()=>void{
   if(bridge)throw new Error('본문 연결이 이미 등록되어 있습니다');
   bridge=value;for(const listener of listeners)listener(bridge);
-  return ()=>{if(bridge!==value)return;bridge=null;for(const listener of listeners)listener(null);};
+  let detached=false;
+  return ()=>{
+    if(detached)return;
+    detached=true;
+    bridge=null;
+    for(const listener of listeners)listener(null);
+  };
 }

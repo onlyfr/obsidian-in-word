@@ -31,3 +31,16 @@ it('requires detaching a provider before another can replace it',async()=>{
  const remove=installNativeBodyBridge({open:vi.fn()});
  expect(()=>installNativeBodyBridge({open:vi.fn()})).toThrow('이미 등록');remove();
 });
+it('keeps a reconnected provider when its previous cleanup runs twice',async()=>{
+ const {installNativeBodyBridge,observeNativeBodyBridge}=await import('../src/body/native-bridge');
+ const provider={open:vi.fn()}, changed=vi.fn(), stop=observeNativeBodyBridge(changed);
+ const first=installNativeBodyBridge(provider);
+ first();
+ const second=installNativeBodyBridge(provider);
+ first();
+ expect(changed.mock.calls.map(([value])=>value)).toEqual([null,provider,null,provider]);
+ expect(()=>installNativeBodyBridge(provider)).toThrow('이미 등록');
+ second();
+ expect(changed).toHaveBeenLastCalledWith(null);
+ stop();
+});
