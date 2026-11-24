@@ -38,8 +38,7 @@ export function initCommunityBrowser(options:{
         const description=node('p',item.description);description.className='option-help';
         const link=node('a',item.repo);link.href=`https://github.com/${item.repo}`;link.target='_blank';link.rel='noopener noreferrer';
         const installed=options.installed().find(p=>p.manifest.id===item.id);
-        const button=node('button',installed?'최신 릴리스로 다시 다운로드':'다운로드');button.type='button';button.disabled=busy || !readAsset;
-        if(!readAsset)button.title=native?'Windows 앱 다시 연결을 누르세요.':'Word에서 Obsidian in Word (Windows)를 열거나 기존 도우미를 연결하세요.';
+        const button=node('button',installed?'최신 릴리스로 다시 다운로드':'다운로드');button.type='button';button.disabled=busy;
         button.onclick=()=>options.runOperation(async()=>{
           status.textContent=`${item.name} 정식 릴리스를 내려받는 중…`;
           try{
@@ -60,7 +59,7 @@ export function initCommunityBrowser(options:{
   load.onclick=async()=>{
     if(fetching || busy)return;
     fetching=true;status.textContent='공식 Obsidian 플러그인 목록을 불러오는 중…';render();
-    try{catalog=await fetchCommunityCatalog();hasCatalog=true;page=0;status.textContent=`공식 목록 ${catalog.length}개. 이름·설명·제작자로 검색하세요.${readAsset ? "" : native ? " 다운로드하려면 Windows 앱 다시 연결을 누르세요." : " 다운로드하려면 Windows 앱 작업창을 열거나 도우미를 연결하세요."}`;}
+    try{catalog=await fetchCommunityCatalog();hasCatalog=true;page=0;status.textContent=`공식 목록 ${catalog.length}개. 이름·설명·제작자로 검색하세요.`;}
     catch(error){status.textContent=`목록을 불러오지 못했습니다: ${(error as Error).message} 목록 버튼으로 다시 시도할 수 있습니다.`;}
     finally{fetching=false;render();}
   };
@@ -70,7 +69,7 @@ export function initCommunityBrowser(options:{
     try{readAsset=await connectCommunityDownloader(connection.value);connection.value='';info.textContent='도우미 연결됨 · 다운로드할 수 있습니다.';}
     catch(error){info.textContent=`연결 실패: ${(error as Error).message}`;}
   });
-  disconnect.onclick=()=>{readAsset=undefined;connection.value='';get('community-connection-status').textContent='도우미 연결 해제됨';render();};
+  disconnect.onclick=()=>{readAsset=undefined;connection.value='';get('community-connection-status').textContent='도우미 연결 해제됨 · 작업창에서 다운로드합니다.';render();};
   previous.onclick=()=>{page=Math.max(0,page-1);render();};next.onclick=()=>{page++;render();};
   render();
   if(native){
@@ -81,12 +80,12 @@ export function initCommunityBrowser(options:{
       try{
         readAsset=(await connectWindowsHost())??undefined;
         status.textContent='Windows 앱에서 다운로드를 제공합니다. 공식 목록을 불러와 검색하세요.';
-      }catch(error){status.textContent=`Windows 앱 연결 실패: ${(error as Error).message} 앱 실행 후 ‘Windows 앱 다시 연결’을 누르세요.`;}
+      }catch(error){status.textContent=`Windows 앱 연결 실패: ${(error as Error).message} 작업창 다운로드를 사용할 수 있습니다.`;}
     });
     reconnect.onclick=connectApp;
     void connectApp();
   } else {
-    status.textContent='다운로드하려면 Word 추가 기능에서 Obsidian in Word (Windows)를 여세요. 기존 도우미 연결도 사용할 수 있습니다.';
+    status.textContent='공식 목록을 불러와 다운로드할 플러그인을 선택하세요.';
   }
   return {refresh:render,setBusy(value:boolean){busy=value;render();}};
 }

@@ -11,7 +11,7 @@ const idPattern=/^[a-z0-9][a-z0-9_.-]{0,149}$/i;
 const string=(v:unknown,max:number):v is string=>typeof v==='string' && v.length>0 && v.length<=max;
 
 /** Fixed public GitHub endpoints only. Limit actual streamed bytes, not just Content-Length. */
-async function read(url:string,max:number,fetcher:Fetcher,asset=false):Promise<string>{
+async function readBytes(url:string,max:number,fetcher:Fetcher,asset=false):Promise<Uint8Array<ArrayBuffer>>{
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
   try{
     const response=await fetcher(url,{signal:controller.signal,credentials:'omit',referrerPolicy:'no-referrer',
@@ -21,20 +21,27 @@ async function read(url:string,max:number,fetcher:Fetcher,asset=false):Promise<s
       :`다운로드 실패 (HTTP ${response.status})`);
     if(Number(response.headers.get('content-length'))>max)throw new Error('파일이 지원 크기를 넘습니다.');
     if(!response.body)throw new Error('다운로드 본문이 없습니다.');
-    const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
-    let length=0,text='';
+    const reader=response.body.getReader(),chunks:Uint8Array[]=[];
+    let length=0;
     try{
       for(;;){const {done,value}=await reader.read();if(done)break;
         length+=value.byteLength;if(length>max)throw new Error('파일이 지원 크기를 넘습니다.');
-        text+=decoder.decode(value,{stream:true});
+        chunks.push(value);
       }
-      return text+decoder.decode();
+      const bytes=new Uint8Array(length);
+      let at=0;for(const chunk of chunks){bytes.set(chunk,at);at+=chunk.length;}
+      return bytes;
     }catch(error){await reader.cancel().catch(()=>{});throw error;}
     finally{reader.releaseLock();}
   }catch(error){
     if(controller.signal.aborted)throw new Error('다운로드 시간이 초과되었습니다. 다시 시도하세요.');
     throw error;
   }finally{clearTimeout(timer);}
+}
+
+const decode=(bytes:Uint8Array)=>new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+async function read(url:string,max:number,fetcher:Fetcher):Promise<string>{
+  return decode(await readBytes(url,max,fetcher));
 }
 
 export function parseCommunityCatalog(value:unknown):CommunityPlugin[]{
@@ -72,6 +79,7 @@ export async function downloadCommunityPlugin(item:CommunityPlugin,fetcher:Fetch
   const release:unknown=JSON.parse(await read(`${base}/latest`,1024*1024,fetcher));
   if(!record(release) || release.draft!==false || release.prerelease!==false || !string(release.tag_name,200) || !Array.isArray(release.assets))
     throw new Error('설치할 정식 릴리스를 찾지 못했습니다.');
+  const tag=release.tag_name;
   const asset=async(name:string,max:number,required:boolean)=>{
     const entries=release.assets as unknown[];
     const found=entries.filter(v=>record(v) && v.name===name);
@@ -80,8 +88,16 @@ export async function downloadCommunityPlugin(item:CommunityPlugin,fetcher:Fetch
     if(found.length!==1 || !record(file) || !Number.isSafeInteger(file.id) || (file.id as number)<=0 ||
       typeof file.size!=='number' || file.size<1 || file.size>max)
       throw new Error(`릴리스의 ${name} 파일이 없거나 지원 크기를 넘습니다.`);
-    if(!readAsset)throw new Error('다운로드 도우미를 먼저 연결하세요. GitHub 첨부파일은 작업창에서 직접 받을 수 없습니다.');
-    return readAsset(item.id,item.repo,file.id as number,max);
+    if(readAsset)return readAsset(item.id,item.repo,file.id as number,max);
+    if(typeof file.digest!=='string' || !/^sha256:[a-f0-9]{64}$/i.test(file.digest))
+      throw new Error(`GitHub에서 ${name}의 검증값을 제공하지 않습니다. 이 릴리스는 Windows 앱 연결이 필요합니다.`);
+    const url=`https://gh-proxy.com/https://github.com/${item.repo}/releases/download/${encodeURIComponent(tag)}/${name}`;
+    const bytes=await readBytes(url,max,fetcher,true);
+    if(bytes.length!==file.size)throw new Error(`${name}의 다운로드 크기가 릴리스와 다릅니다.`);
+    const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+    const digest='sha256:'+Array.from(hash,b=>b.toString(16).padStart(2,'0')).join('');
+    if(digest!==file.digest.toLowerCase())throw new Error(`${name}의 검증값이 GitHub 릴리스와 다릅니다. 설치를 중단했습니다.`);
+    return decode(bytes);
   };
   const manifest=releaseManifest(JSON.parse((await asset('manifest.json',64*1024,true))!),item.id);
   const [mainJs,stylesCss]=await Promise.all([asset('main.js',20*1024*1024,true),asset('styles.css',2*1024*1024,false)]);

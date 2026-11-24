@@ -133,6 +133,7 @@ def main():
     parser.add_argument('--body-session-only', action='store_true', help='Run only experimental body-session lifecycle cases')
     parser.add_argument('--settings-ui-only', action='store_true', help='Run actual task-pane settings tabs/editor/plugin UI checks without keyboard input')
     parser.add_argument('--transfer-only', action='store_true', help='Export synthetic settings from the real web task pane for native transfer tests')
+    parser.add_argument('--community-web-only', action='store_true', help='Download and verify a real plugin in the web pane without a helper')
     parser.add_argument('--community-only', action='store_true', help='Check live community catalog/release downloads and plugin UI without keys')
     parser.add_argument('--partial-only', action='store_true', help='Check a single paragraph edit and one native Undo in a mixed document')
     parser.add_argument('--document-font-probe', action='store_true', help='Measure Word font selection, native MathML layout and raster glyph differences')
@@ -337,6 +338,11 @@ def main():
                 (run/'transfer.json').write_text(exported['archive'],encoding='utf-8')
                 (run/'transfer-summary.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
                 print(f'Transfer source passed. Archive: {run / "transfer.json"}',flush=True)
+                return
+            if args.community_web_only:
+                case('js','setup','setup.js')
+                case('js','settings-ui','settings-ui.js')
+                case('js','community-web','community-web.js')
                 return
             if args.community_only:
                 case('js','setup','setup.js')

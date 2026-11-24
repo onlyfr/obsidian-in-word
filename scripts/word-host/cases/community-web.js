@@ -1,0 +1,17 @@
+const wait=async(predicate,message)=>{const end=Date.now()+40000;while(Date.now()<end&&!predicate())await new Promise(r=>setTimeout(r,50));must(predicate(),message);};
+document.getElementById('open-settings').click();document.getElementById('plugins-tab').click();
+must(!document.querySelector('meta[name="oiw-windows-host"]'),'ordinary web pane');
+document.getElementById('community-load').click();
+const search=document.getElementById('community-search'),status=document.getElementById('community-status');
+await wait(()=>!search.disabled,'catalog loaded');
+const id='obsidian-latex-suite',installed=()=>document.querySelector('[data-plugin-id="'+id+'"]');
+must(!installed(),'no previous fixture install');
+search.value=id;search.dispatchEvent(new Event('input'));
+const download=document.querySelector('[data-community-id="'+id+'"] button');
+must(!download.disabled,'download enabled without helper');download.click();
+await wait(()=>status.textContent.includes('완료')||status.textContent.includes('실패'),'download completed');
+must(installed()?.querySelector('button').textContent==='켜기',status.textContent);
+const version=installed().querySelector('.plugin-name').firstChild.textContent;
+[...installed().querySelectorAll('button')].find(b=>b.textContent==='삭제').click();
+await wait(()=>!installed(),'cleanup');
+return {browserOnly:true,version};

@@ -33,7 +33,7 @@ try{
  document.getElementById('community-next').click();must(document.getElementById('community-page').textContent.includes('2 / 3'),'catalog pagination works');
  const search=document.getElementById('community-search');search.value='math maker';search.dispatchEvent(new Event('input'));
  must(document.querySelectorAll('[data-community-id]').length===1,'search uses combined name/description/author terms');
- must(document.querySelector('[data-community-id] button').disabled,'downloads require explicit helper connection');
+ must(!document.querySelector('[data-community-id] button').disabled,'web downloads available');
  document.getElementById('community-connection').value=globalThis.communityConnection;document.getElementById('community-connect').click();
  await wait(()=>document.getElementById('community-connection-status').textContent.includes('연결됨'),'helper connection UI works');
  must(document.getElementById('community-connection').value==='','connection code removed from input after connecting');
@@ -61,7 +61,7 @@ try{
  must(Array.from(commands.options).filter(option=>option.textContent==='Community insert fixture').length===1,'replacement does not duplicate commands');
  must(document.head.querySelectorAll('style[data-plugin="'+item.id+'"]').length===1,'replacement does not duplicate stylesheet');
  must(new LocalDataStore().get(item.id).kept==='fixture-data','plugin settings retained through replacement');
- document.getElementById('community-disconnect').click();must(document.querySelector('[data-community-id] button').disabled,'disconnect prevents new downloads');
+ document.getElementById('community-disconnect').click();must(!document.querySelector('[data-community-id] button').disabled,'web downloads remain available');
  must(!!button('끄기'),'disconnect does not unload installed plugin');
  const after=await snapshot();must(JSON.stringify(before.paragraphs)===JSON.stringify(after.paragraphs) && before.tables===after.tables && before.equations===after.equations,'community operations leave Word content unchanged');
  document.getElementById('close-settings').click();

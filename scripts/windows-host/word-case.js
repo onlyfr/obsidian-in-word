@@ -38,10 +38,10 @@ try {
  window.fetch=(url,...args)=>url==='/host-session'?Promise.reject(new Error('test disconnect')):originalFetch.call(window,url,...args);
  reconnect.click();
  await wait(()=>status.textContent.includes('Windows 앱 연결 실패'),'failed connection visible');
- must(document.querySelector('[data-community-id="'+probeId+'"] button').disabled,'offline download disabled');
+ must(!document.querySelector('[data-community-id="'+probeId+'"] button').disabled,'download remains available without native connection');
 } finally {window.fetch=originalFetch;}
 reconnect.click();
-await wait(()=>!document.querySelector('[data-community-id="'+probeId+'"] button').disabled,'reconnect enables download without reloading Word');
+await wait(()=>status.textContent.includes('Windows 앱에서') && !reconnect.disabled,'native connection restored without reloading Word');
 document.querySelector('[data-community-id="'+probeId+'"] button').click();
 await wait(()=>/완료|실패/.test(status.textContent),'download finished');
 must(status.textContent.includes('다운로드 완료'),status.textContent);

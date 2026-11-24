@@ -39,10 +39,10 @@ it('rejects wrong identity before downloading code, absent assets, oversized ass
    await expect(downloadCommunityPlugin(item,async()=>json(metadata),reader)).rejects.toThrow();
  expect(()=>releaseManifest({id:'example',name:'Example',version:'bad'},'example')).toThrow();
 });
-it('does not install a partially downloaded bundle and requires a native asset reader',async()=>{
+it('does not install a partially downloaded bundle or an unverified relay file',async()=>{
  const reader=async(_id:string,_repo:string,id:number)=>{if(id===2)throw new Error('offline');return JSON.stringify({id:'example',name:'Example',version:'1.2.3'});};
  await expect(downloadCommunityPlugin(item,async()=>json(release),reader)).rejects.toThrow('offline');
- await expect(downloadCommunityPlugin(item,async()=>json(release))).rejects.toThrow('도우미');
+ await expect(downloadCommunityPlugin(item,async()=>json(release))).rejects.toThrow('검증값');
 });
 it('reports API limits and enforces streamed catalog size even without Content-Length',async()=>{
  await expect(fetchCommunityCatalog(async()=>new Response('',{status:403}))).rejects.toThrow('한도');
@@ -59,4 +59,16 @@ it('accepts only explicit loopback connection codes and uses session authorizati
  expect(await reader('example','maker/example',123,1024)).toBe('bundle');
  const [,options]=fetcher.mock.calls[1];expect(options.credentials).toBe('omit');
  expect(JSON.parse(options.body as string)).toEqual({id:'example',repo:'maker/example',assetId:123,maxBytes:1024});
+});
+it('rejects same-size altered bytes from the web relay before reading plugin code',async()=>{
+ const original=new TextEncoder().encode(JSON.stringify({id:item.id,name:item.name,version:'1.2.3'}));
+ const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',original));
+ const digest='sha256:'+Array.from(hash,b=>b.toString(16).padStart(2,'0')).join('');
+ const altered=original.slice();altered[0]^=1;
+ const fetcher=vi.fn(async(url:RequestInfo|URL)=>String(url).endsWith('/latest')
+   ?json({...release,assets:[{...release.assets[0],size:original.length,digest},release.assets[1]]})
+   :new Response(altered));
+ await expect(downloadCommunityPlugin(item,fetcher)).rejects.toThrow('검증값');
+ expect(fetcher).toHaveBeenCalledTimes(2);
+ expect(fetcher.mock.calls[1][0]).toBe('https://gh-proxy.com/https://github.com/maker/example/releases/download/1.2.3/manifest.json');
 });
