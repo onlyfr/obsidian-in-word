@@ -305,6 +305,9 @@ def main():
                 case('js','setup','setup.js')
                 measured=case('js','document-font-probe','document-font-probe.js')['value']
                 (run/'document-font.json').write_text(json.dumps(measured,indent=2),encoding='utf-8')
+                expected=case('js','document-font-output','document-font-output.js')['value']
+                case('com','document-font-reopen','session-reopen.ps1')
+                command(run,'js','document-font-reopened','const expected='+json.dumps(expected)+';'+(SCRIPTS/'cases'/'document-font-reopen.js').read_text(encoding='utf-8'),worker=word)
                 print(f'Font measurements: {run}',flush=True)
                 return
             if args.math_only:

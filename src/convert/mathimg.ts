@@ -339,7 +339,9 @@ export async function applyMathImages(
   const outcomes = await resolveMathImages(
     planned.filter((q) => q.img),
     sidecar,
-    rasterizer??(async()=>(await import('./mathraster')).createRasterizer(style)),
+    rasterizer??(async()=>style.fontFamily
+      ? (await import('./document-font-raster')).documentFontRaster(style,style.fontFamily)
+      : (await import('./mathraster')).createRasterizer(style)),
     Date.now,mathAppearanceKey(style),
   );
   return planMathImages(html, planned, outcomes, mode);

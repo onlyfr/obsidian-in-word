@@ -30,7 +30,7 @@ export function parseTransfer(text:string):TransferArchive{
   });
   const p=value.preferences,e=p.editor,a=p.mathAppearance;
   if(!object(e) || typeof e.lineNumbers!=='boolean' || typeof e.wrap!=='boolean' || ![12,14,16,18,20].includes(e.fontSize as number) ||
-    !['hybrid','images'].includes(p.mathOutput as string) || !['manual','selection'].includes(p.mathSource as string) || !object(a) ||
+    !['hybrid','images'].includes(p.mathOutput as string) || !['manual','selection','document'].includes(p.mathSource as string) || !object(a) ||
     typeof a.sizePt!=='number' || a.sizePt<6 || a.sizePt>36 || Math.round(a.sizePt*2)!==a.sizePt*2 || typeof a.color!=='string' || !/^#[0-9a-f]{6}$/i.test(a.color))return fail();
   return {format:'obsidian-in-word-settings',version:1,plugins,preferences:{editor:{lineNumbers:e.lineNumbers,wrap:e.wrap,fontSize:e.fontSize as Preferences['editor']['fontSize']},mathOutput:p.mathOutput as Preferences['mathOutput'],mathSource:p.mathSource as Preferences['mathSource'],mathAppearance:{sizePt:a.sizePt,color:a.color.toLowerCase()}}};
 }

@@ -1,7 +1,7 @@
 import { plainParagraphEdit, plainWordContent } from "./paragraph-edit";
 import { leftoverChecks } from "./markers";
 import type { MathOutputMode } from "../convert/mathimg";
-import {selectionMathAppearance,type MathAppearance,type MathAppearanceSource} from '../convert/math-appearance';
+import {documentFontName,selectionMathAppearance,type MathAppearance,type MathAppearanceSource} from '../convert/math-appearance';
 import { trailingBlankParagraphs } from "../convert/trailing-blanks";
 import { hashId, normText, placeholderIds, type FloatBlock, type FloatReport } from "../convert/blocks";
 import {
@@ -372,12 +372,14 @@ export async function replaceSelectionWithMarkdown(
     const mathNotes: string[] = [];
     if (equations.some((q) => q.img) || (options.mathOutput === "images" && equations.length)) {
       let appearance=options.mathAppearance;
-      if(options.mathOutput==='images' && options.mathAppearanceSource==='selection'){
+      if(options.mathOutput==='images' && (options.mathAppearanceSource==='selection' || options.mathAppearanceSource==='document')){
         const font=sel0.font;
-        font.load('size,color');
+        const useFont = options.mathAppearanceSource === 'document';
+        font.load(useFont ? 'size,color,name' : 'size,color');
         await context.sync();
         appearance=selectionMathAppearance(font);
-        mathNotes.push(`선택 영역 서식: 수식 그림 ${appearance.sizePt}pt · ${appearance.color}`);
+        if (useFont) appearance.fontFamily = documentFontName(font.name);
+        mathNotes.push(`선택 영역 서식: 수식 그림 ${appearance.sizePt}pt · ${appearance.color}${appearance.fontFamily ? " · "+appearance.fontFamily : ""}`);
       }
       const plan = await (await import("../convert/mathimg")).applyMathImages(html0, equations, sidecar, undefined, options.mathOutput,appearance);
       ({ html, active, pictures } = plan);

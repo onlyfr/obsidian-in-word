@@ -3,7 +3,7 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { loadMathOutput, saveMathOutput,loadMathAppearance,saveMathAppearance,loadMathAppearanceSource,saveMathAppearanceSource,loadEditorPreferences,saveEditorPreferences,type EditorPreferences } from "./preferences";
-import {normalizeMathAppearance} from '../convert/math-appearance';
+import {appearanceSource,normalizeMathAppearance} from '../convert/math-appearance';
 import {initSettingsDialog} from "./settings-dialog";
 import {bindBodyControls} from "./body-binding";
 import type { MathOutputMode } from "../convert/mathimg";
@@ -27,9 +27,9 @@ let mathAppearance=loadMathAppearance();
 mathSize.value=String(mathAppearance.sizePt);mathColor.value=mathAppearance.color;
 const updateMathControls=()=>{
   mathSource.disabled=busy || mathOutput.value!=='images';
-  mathSize.disabled=mathColor.disabled=mathSource.disabled || mathSource.value==='selection';
+  mathSize.disabled=mathColor.disabled=mathSource.disabled || mathSource.value!=='manual';
 };
-mathSource.onchange=()=>{saveMathAppearanceSource(mathSource.value==='selection'?'selection':'manual');updateMathControls();};
+mathSource.onchange=()=>{saveMathAppearanceSource(appearanceSource(mathSource.value));updateMathControls();};
 mathOutput.onchange = () => {saveMathOutput(mathOutput.value === "images" ? "images" : "hybrid");updateMathControls();};
 const saveMathStyle=()=>{
   mathAppearance=normalizeMathAppearance({sizePt:Number(mathSize.value),color:mathColor.value});
@@ -82,7 +82,7 @@ const afterPaint = () => {
     .catch((e) => setStatus(`마크다운 언어 지원을 불러오지 못했습니다: ${(e as Error).message}`));
   import("./plugins-ui")
     .then((m) => m.initPlugins(view, pluginExtensions, setStatus,()=>settings.open("plugins"),{exclusive:withPaneLock,preferencesChanged:refreshPreferences,
-      preferencesSnapshot:()=>({editor:{...preferences},mathAppearance:{...mathAppearance},mathOutput:mathOutput.value==='images'?'images':'hybrid',mathSource:mathSource.value==='selection'?'selection':'manual'})}))
+      preferencesSnapshot:()=>({editor:{...preferences},mathAppearance:{...mathAppearance},mathOutput:mathOutput.value==='images'?'images':'hybrid',mathSource:appearanceSource(mathSource.value)})}))
     .catch((e) => {
       const message=`플러그인 초기화 실패: ${(e as Error).message}`;
       document.getElementById("plugin-loading")!.textContent=message;setStatus(message);
@@ -146,7 +146,7 @@ Office.onReady((info) => {
       const { askConfirm } = await import("./confirm");
       const { missing, notes } = await replaceSelectionWithMarkdown(view.state.doc.toString(), (msg) =>
         askConfirm(document.body, msg, "바꾸기", "취소"),
-        { mathOutput: mathOutput.value as MathOutputMode,mathAppearance,mathAppearanceSource:mathSource.value==='selection'?'selection':'manual' },
+        { mathOutput: mathOutput.value as MathOutputMode,mathAppearance,mathAppearanceSource:appearanceSource(mathSource.value) },
       );
       if (missing.length) throw new Error(`복원할 수 없는 Word 객체: ${missing.join(", ")}`);
       return [...new Set(notes)];
