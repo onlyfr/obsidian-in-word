@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {EditorView} from "@codemirror/view";
 import {readFileSync} from "node:fs";
 const markup=new DOMParser().parseFromString(readFileSync('src/taskpane/index.html','utf8'),'text/html').body.innerHTML;
 
@@ -90,6 +91,28 @@ describe("task pane start-up status", () => {
     // Options reconfigure the same editor instead of creating a new view.
     expect(document.querySelector('.cm-content')).toBe(content);
     expect(content.textContent).toBe('saved **text**');
+  });
+  it('keeps typing during a slow reload and only replaces the draft after confirmation', async()=>{
+    let resolve!: (value:{markdown:string; notes:string[]})=>void;
+    const read=vi.fn(()=>new Promise(r=>{resolve=r;}));
+    vi.doMock('../src/taskpane/word',()=>({readSelectionAsMarkdown:read}));
+    await import('../src/taskpane/taskpane');await settle();ready!({host:'Word'});
+    const editor=EditorView.findFromDOM(document.querySelector('.cm-content')!)!;
+    const load=document.getElementById('load')!;
+    load.click();await settle();
+    editor.dispatch({changes:{from:0,insert:'새 초안'}});
+    resolve({markdown:'이전 선택',notes:[]});await settle();
+    expect(editor.state.doc.toString()).toBe('새 초안');
+    load.click();await settle();document.getElementById('inline-confirm-no')!.click();await settle();
+    expect(read).toHaveBeenCalledTimes(1);
+    load.click();await settle();document.getElementById('inline-confirm-yes')!.click();await settle();
+    resolve({markdown:'새 선택',notes:[]});await settle();
+    expect(editor.state.doc.toString()).toBe('새 선택');
+    editor.dispatch({selection:{anchor:1}});
+    const doc=editor.state.doc;
+    load.click();await settle();resolve({markdown:'새 선택',notes:[]});await settle();
+    expect(editor.state.doc).toBe(doc);
+    expect(editor.state.selection.main.head).toBe(1);
   });
   it('restores saved editor appearance on startup',async()=>{
     localStorage.setItem('oiw:editor-options',JSON.stringify({lineNumbers:false,wrap:false,fontSize:20}));

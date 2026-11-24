@@ -1,6 +1,11 @@
 :root { color-scheme: light dark; }
 body { margin: 0; font: 14px system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
-header { display: flex; gap: 8px; padding: 8px; }
+header { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+header button { flex: 1 0 auto; white-space: nowrap; }
+@media (max-width: 400px) {
+  header { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  header button { white-space: normal; word-break: keep-all; }
+}
 #open-settings { flex: none; }
 .body-controls { padding: 8px; border-top: 1px solid #8884; }
 .body-control-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

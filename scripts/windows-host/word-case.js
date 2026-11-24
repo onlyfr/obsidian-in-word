@@ -5,7 +5,12 @@ must(document.querySelector('meta[name=oiw-windows-host]'),'bundled host marker'
 await Word.run(async c=>{c.document.body.insertText('Windows app fixture','Replace');c.document.body.getRange('Whole').select();await c.sync();});
 document.getElementById('load').click();await wait(()=>document.getElementById('status').textContent.includes('불러오기 완료'),'production load button');
 const content=document.querySelector('.cm-content');content.textContent='**Host bold** and $x^2$';content.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText'}));
-await new Promise(r=>setTimeout(r,400));document.getElementById('apply').click();
+await new Promise(r=>setTimeout(r,400));document.getElementById('load').click();
+await wait(()=>document.getElementById('inline-confirm-no'),'reload protects unapplied draft');
+document.getElementById('inline-confirm-no').click();
+await wait(()=>document.getElementById('status').textContent.includes('불러오기 취소'),'reload cancelled');
+must(content.textContent.includes('**Host bold**'),'cancel keeps draft');
+document.getElementById('apply').click();
 await wait(()=>document.getElementById('status').textContent.includes('적용 완료'),'production apply button: '+document.getElementById('status').textContent);
 const actual=await Word.run(async c=>{const html=c.document.body.getHtml(),xml=c.document.body.getOoxml();await c.sync();return {html:html.value,xml:xml.value};});
 must(actual.html.includes('Host bold') && actual.xml.includes('<m:oMath'),'bundled native app renders actual Word math');

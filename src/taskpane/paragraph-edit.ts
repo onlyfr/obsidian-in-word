@@ -5,11 +5,14 @@ const plainLine = /^[\p{L}\p{M}\p{N} ,.!?():;·，。！？]+$/u;
 
 export function plainParagraphEdit(original: string, edited: string): {before:string; after:string} {
   const before = original.split("\n"), after = edited.split("\n");
-  const changed = before.reduce<number[]>((indices, line, i) => {
-    if (line !== after[i]) indices.push(i);
-    return indices;
-  }, []);
-  const i = changed[0];
+  const error = "서식 없는 독립 문단 한 곳의 텍스트만 수정한 뒤 부분 적용하세요.";
+  if (before.length !== after.length) throw new Error(error);
+  let i = -1;
+  for (let index = 0; index < before.length; index++) {
+    if (before[index] === after[index]) continue;
+    if (i !== -1) throw new Error(error);
+    i = index;
+  }
   const standalone = (source:string, lines:string[]) => {
     const line = lines[i];
     if (!line || !plainLine.test(line) || line !== line.trim() || lines.indexOf(line) !== lines.lastIndexOf(line)) return false;
@@ -18,8 +21,8 @@ export function plainParagraphEdit(original: string, edited: string): {before:st
       token.map?.[0] === i && token.map[1] === i + 1 && tokens[j+1]?.children?.length === 1 &&
       tokens[j+1].children![0].type === "text" && tokens[j+1].children![0].content === line);
   };
-  if (before.length !== after.length || changed.length !== 1 || !standalone(original,before) || !standalone(edited,after))
-    throw new Error("서식 없는 독립 문단 한 곳의 텍스트만 수정한 뒤 부분 적용하세요.");
+  if (i === -1 || !standalone(original,before) || !standalone(edited,after))
+    throw new Error(error);
   return {before:before[i], after:after[i]};
 }
 

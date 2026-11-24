@@ -145,9 +145,8 @@ interface ParagraphBaseline {
 let paragraphBaseline: ParagraphBaseline | undefined;
 
 /** Read the current selection from Word as Obsidian-flavored markdown. */
-export async function readSelectionAsMarkdown(): Promise<ReadResult> {
-  paragraphBaseline = undefined;
-  return Word.run(async (context) => {
+export async function readSelectionAsMarkdown(acceptResult: () => boolean = () => true): Promise<ReadResult> {
+  const result = await Word.run(async (context) => {
     const loaded = await loadSidecar(context);
     const sidecar = loaded.sidecar;
     const selection = context.document.getSelection();
@@ -208,7 +207,6 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
       html.value, sidecar, hints, pictures.map((p) => p.value), floatOoxml, report, scan.items, mathReport, tableCaps, tableReport,
       trailingBlankParagraphs(trailing.reverse().map(p => ({ text: p.text, tableNestingLevel: p.tableNestingLevel, hasInlinePictures: p.inlinePictures.items.length > 0 }))),
     );
-    lastRegion = regionSignature(selection.paragraphs.items.map((p) => p.text));
     // Objects referenced by the markdown just produced are marked as used; other regions' entries are left alone.
     const keep = new Set([...placeholderIds(markdown), ...mathIds(markdown), ...mathImgIds(markdown), ...tableIds(markdown)]);
     await saveSidecar(context, sidecar, loaded, keep);
@@ -228,9 +226,14 @@ export async function readSelectionAsMarkdown(): Promise<ReadResult> {
     if (tableReport.unpaired) notes.push(`경고: 표 ${tableReport.unpaired}개를 HTML/OOXML과 짝지을 수 없어 원본 그대로 보존합니다`);
     if (mathReport.unpaired)
       notes.push(`경고: 수식 ${mathReport.unpaired}개를 변환하지 못했습니다(표 안 등). 적용 시 중단됩니다`);
-    if (supportsIds) paragraphBaseline = {markdown, paragraphs: paragraphs.map(p => ({id:p.uniqueLocalId, text:p.text}))};
-    return { markdown, notes };
+    return {markdown, notes, signature:regionSignature(paragraphs.map(p => p.text)),
+      baseline:supportsIds ? {markdown, paragraphs:paragraphs.map(p => ({id:p.uniqueLocalId,text:p.text}))} : undefined};
   });
+  if (acceptResult()) {
+    lastRegion = result.signature;
+    paragraphBaseline = result.baseline;
+  }
+  return {markdown:result.markdown, notes:result.notes};
 }
 
 export interface ApplyResult {

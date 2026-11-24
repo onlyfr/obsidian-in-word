@@ -71,8 +71,14 @@ const updateEditorOptions=()=>{
 };
 numbers.onchange=wrap.onchange=fontSize.onchange=updateEditorOptions;
 
-const setDoc = (text: string) =>
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+// Keep immutable editor snapshots. Comparing them on load avoids serializing the draft on every keystroke.
+let syncedDoc = view.state.doc;
+const setDoc = (text: string) => {
+  const next = view.state.toText(text);
+  if (!view.state.doc.eq(next))
+    view.dispatch({changes:{from:0,to:view.state.doc.length,insert:next}});
+  syncedDoc = view.state.doc;
+};
 
 // After the first paint: markdown language support, then the plugin subsystem, then warm up the converters so the
 // first click on 불러오기/적용 does not wait for the network. Failures are non-fatal and only reported.
@@ -109,12 +115,13 @@ async function withPaneLock<T>(action:()=>Promise<T>):Promise<T>{
   try{return await action();}
   finally{busy=false;controls.forEach(control=>control.disabled=false);updateMathControls();}
 }
-async function run(label: string, fn: () => Promise<string[] | void>) {
+async function run(label: string, fn: () => Promise<string[] | false | void>) {
   if (busy) return;
   try {
     await withPaneLock(async()=>{
     setStatus(`${label}…`);
     const notes = (await fn()) ?? [];
+    if (notes === false) { setStatus(`${label} 취소 · 작업창 편집을 유지했습니다.`); return; }
     setStatus([`${label} 완료`, ...notes].join(" · "));
     });
   } catch (e) {
@@ -130,25 +137,38 @@ Office.onReady((info) => {
   bindBodyControls(document.getElementById('body-controls')!);
   document.getElementById("load")!.onclick = () =>
     run("불러오기", async () => {
+      const draft = view.state.doc;
+      if (!draft.eq(syncedDoc)) {
+        const {askConfirm} = await import("./confirm");
+        const agreed = await askConfirm(document.body, "아직 Word에 적용하지 않은 편집이 있습니다. 선택 영역을 불러와 작업창 내용을 바꿀까요?", "불러오기", "편집 계속");
+        if (!agreed || !view.state.doc.eq(draft)) return false;
+      }
       const { readSelectionAsMarkdown } = await loadWord();
-      const { markdown, notes } = await readSelectionAsMarkdown();
+      const { markdown, notes } = await readSelectionAsMarkdown(() => view.state.doc.eq(draft));
+      if (!view.state.doc.eq(draft)) return false;
       setDoc(markdown);
       return notes;
     });
   document.getElementById("partial")!.onclick = () =>
     run("부분 적용", async () => {
       const { applyParagraphEdit } = await loadWord();
-      await applyParagraphEdit(view.state.doc.toString());
+      const submitted = view.state.doc;
+      await applyParagraphEdit(submitted.toString());
+      syncedDoc = submitted;
+      if (!view.state.doc.eq(submitted)) return ["이후 작업창에서 편집한 내용은 다음 적용에 반영됩니다."];
     });
   document.getElementById("apply")!.onclick = () =>
     run("적용", async () => {
       const { replaceSelectionWithMarkdown } = await loadWord();
       const { askConfirm } = await import("./confirm");
-      const { missing, notes } = await replaceSelectionWithMarkdown(view.state.doc.toString(), (msg) =>
+      const submitted = view.state.doc;
+      const { missing, notes } = await replaceSelectionWithMarkdown(submitted.toString(), (msg) =>
         askConfirm(document.body, msg, "바꾸기", "취소"),
         { mathOutput: mathOutput.value as MathOutputMode,mathAppearance,mathAppearanceSource:appearanceSource(mathSource.value) },
       );
       if (missing.length) throw new Error(`복원할 수 없는 Word 객체: ${missing.join(", ")}`);
+      syncedDoc = submitted;
+      if (!view.state.doc.eq(submitted)) return [...new Set(notes), "이후 작업창에서 편집한 내용은 다음 적용에 반영됩니다."];
       return [...new Set(notes)];
     });
   // Office.onReady usually fires after the lazy chunks have started: do not hide a load failure reported by then.
