@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as temml from "temml";
-import { mathMLToElement, mathRenderer, sanitizeMathML } from "../src/plugins/math-impl";
+import { mathMLToElement, sanitizeMathML } from "../src/plugins/math-impl";
 import { createRasterizer } from "../src/convert/mathraster";
 import {renderMathSvg} from '../src/convert/math-svg';
 

@@ -65,3 +65,5 @@ npm run build
 현재 제품의 편집 방식은 작업창에서의 수동 변환입니다. Word 본문에서 커서 이동에 따라 마크다운과 Word 표현을 자동 전환하는 기능은 후속 개발 항목입니다. [구현 계획](docs/implementation-plan.md) · [로드맵](docs/roadmap.md) · [검증 기록](docs/testing/)
 
 Microsoft 및 Obsidian과 무관한 비공식 개인 프로젝트입니다. Word와 Obsidian은 각 소유자의 상표입니다.
+
+[2026-11-24 저장소 점검 및 실제 Word 검증 결과](docs/testing/2026-11-24-repository-review.md)

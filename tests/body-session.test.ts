@@ -99,7 +99,7 @@ describe('experimental body editing sessions',()=>{
   port.fail=null;await session.recover('a','current');expect(port.blocks.get('a')!.mode).toBe('rendered');
  });
  it('rejects ambiguous partial entry and allows an explicit original restore',async()=>{
-  const {port,session,select}=setup();port.fail='partial';await expect(select('a')).rejects.toThrow('before mode tag');
+  const {port,select}=setup();port.fail='partial';await expect(select('a')).rejects.toThrow('before mode tag');
   const restarted=new BodyEditSession(port,inlineBodyCodec);expect(await restarted.pendingRecovery()).toEqual(['a']);
   await expect(restarted.recover('a','current')).rejects.toThrow('판단할 수 없습니다');
   port.fail=null;await restarted.recover('a','original');expect(port.blocks.get('a')!.text).toBe('a bold');

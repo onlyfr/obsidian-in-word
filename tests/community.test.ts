@@ -52,7 +52,7 @@ it('reports API limits and enforces streamed catalog size even without Content-L
 it('uses the current Windows session for asset downloads',async()=>{
  const marker=document.createElement('meta');marker.name='oiw-windows-host';marker.content='1';document.head.append(marker);
  vi.stubGlobal('location',{origin:'https://localhost:49175'});
- const fetcher=vi.fn(async(url:string,options:RequestInit)=>url==='/host-session'?json({protocol:1,capabilities:{downloads:true},token:'a'.repeat(64)}):url.endsWith('/status')?json({protocol:1}):new Response('bundle'));
+ const fetcher=vi.fn(async(url:string,_options:RequestInit)=>url==='/host-session'?json({protocol:1,capabilities:{downloads:true},token:'a'.repeat(64)}):url.endsWith('/status')?json({protocol:1}):new Response('bundle'));
  vi.stubGlobal('fetch',fetcher);
  const reader=await connectWindowsHost();
  expect(await reader!('example','maker/example',123,1024)).toBe('bundle');
@@ -72,4 +72,21 @@ it('rejects same-size altered bytes from the web relay before reading plugin cod
  await expect(downloadCommunityPlugin(item,fetcher)).rejects.toThrow('검증값');
  expect(fetcher).toHaveBeenCalledTimes(2);
  expect(fetcher.mock.calls[1][0]).toBe('https://gh-proxy.com/https://github.com/maker/example/releases/download/1.2.3/manifest.json');
+});
+it('keeps the native deadline active until the asset body finishes',async()=>{
+ const marker=document.createElement('meta');marker.name='oiw-windows-host';marker.content='1';document.head.append(marker);
+ vi.stubGlobal('location',{origin:'https://localhost:49175'});
+ vi.stubGlobal('fetch',async(url:string,options:RequestInit)=>{
+   if(url==='/host-session')return json({protocol:1,capabilities:{downloads:true},token:'f'.repeat(64)});
+   if(url.endsWith('/status'))return json({protocol:1});
+   return new Response(new ReadableStream({start(controller){
+     options.signal!.addEventListener('abort',()=>controller.error(new Error('aborted')),{once:true});
+   }}));
+ });
+ vi.useFakeTimers();
+ try{
+   const read=await connectWindowsHost();
+   const outcome=expect(read!('example','maker/example',1,100)).rejects.toThrow('시간이 초과');
+   await vi.advanceTimersByTimeAsync(30000);await outcome;
+ }finally{vi.useRealTimers();}
 });

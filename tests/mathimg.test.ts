@@ -22,7 +22,6 @@ import {
   mathImgAlt,
   parseMathImgAlt,
   placedSize,
-  planMathImages,
   resolveMathImages,
   type MathRasterizer,
   type RasterResult,

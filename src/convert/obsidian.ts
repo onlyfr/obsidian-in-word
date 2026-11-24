@@ -22,7 +22,7 @@ import {
   type ImgCapture,
   type MathResolved,
 } from "./equations";
-import { TABLE_MARKER_RE, analyzeHtmlTable, buildTableOoxml, findTableBlocks, modelToLines, sameModel, tableId, tableMarker, type TableModel } from "./tables";
+import { analyzeHtmlTable, buildTableOoxml, findTableBlocks, modelToLines, sameModel, tableId, tableMarker, type TableModel } from "./tables";
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
 

@@ -9,8 +9,6 @@ import uuid
 import winreg
 import argparse
 import socket
-import ssl
-from urllib.request import Request,urlopen
 
 repo=Path(__file__).resolve().parents[2]
 parser=argparse.ArgumentParser();parser.add_argument('--transfer-source',type=Path);args=parser.parse_args()
@@ -53,10 +51,16 @@ with (run/'server.log').open('w') as server_log,(run/'word.log').open('w') as wo
    reopened=harness.command(run,'js','transfer-reopened',code,worker=word)
    (run/'transfer-summary.json').write_text(json.dumps([transferred,reopened],ensure_ascii=False,indent=2),encoding='utf-8')
  finally:
-  if word is not None and word.poll() is None:
-   harness.command(run,'com','close','$true',15);word.wait(timeout=20)
-  with winreg.OpenKey(winreg.HKEY_CURRENT_USER,registry,0,winreg.KEY_ALL_ACCESS) as key:
-   if winreg.QueryValueEx(key,ident)[0]==str(manifest):winreg.DeleteValue(key,ident)
-  if (run/'stop-token').exists():
-   try:subprocess.run(['powershell.exe','-NoProfile','-File',str(repo/'scripts/windows-host/stop.ps1'),'-RunDirectory',str(run)],check=True,capture_output=True,timeout=10)
-   except Exception:pass # The owned headless server also expires on its own after three minutes.
+  try:
+   if word is not None and word.poll() is None:
+    harness.command(run,'com','close','$true',15);word.wait(timeout=20)
+  finally:
+   try:
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER,registry,0,winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE) as key:
+     if winreg.QueryValueEx(key,ident)[0]==str(manifest):winreg.DeleteValue(key,ident)
+   except FileNotFoundError:
+    pass
+   finally:
+    if (run/'stop-token').exists():
+     try:subprocess.run(['powershell.exe','-NoProfile','-File',str(repo/'scripts/windows-host/stop.ps1'),'-RunDirectory',str(run)],check=True,capture_output=True,timeout=10)
+     except (OSError,subprocess.SubprocessError):pass # The owned server also expires after three minutes.
