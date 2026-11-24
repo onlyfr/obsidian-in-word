@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net48</TargetFramework><AssemblyName>ObsidianInWord.Launcher</AssemblyName><LangVersion>latest</LangVersion></PropertyGroup>
+  <ItemGroup><EmbeddedResource Include="../windows-host/ribbon/*.png"><LogicalName>%(Filename)%(Extension)</LogicalName></EmbeddedResource></ItemGroup>
+</Project>

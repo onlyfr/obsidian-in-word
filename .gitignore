@@ -12,3 +12,5 @@ scripts/windows-host/obj/
 scripts/windows-setup-checks/bin/
 scripts/windows-setup-checks/obj/
 __pycache__/
+native/word-launcher/bin/
+native/word-launcher/obj/

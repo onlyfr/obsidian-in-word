@@ -6,9 +6,13 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="../../dist/**/*" Exclude="../../dist/downloads/**/*"><LogicalName>pane/%(RecursiveDir)%(Filename)%(Extension)</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="../word-launcher/bin/$(Configuration)/net48/ObsidianInWord.Launcher.dll" LogicalName="word-launcher.dll"/>
     <EmbeddedResource Include="ribbon.xml" LogicalName="host-ribbon.xml"/>
     <EmbeddedResource Include="ribbon/*.png"><LogicalName>pane/ribbon/%(Filename)%(Extension)</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="../../manifest.xml"><LogicalName>host-manifest.xml</LogicalName></EmbeddedResource>
   </ItemGroup>
+  <Target Name="BuildWordLauncher" BeforeTargets="PrepareForBuild">
+    <MSBuild Projects="../word-launcher/Launcher.csproj" Targets="Restore;Build" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;SelfContained;PublishSingleFile;TargetFramework;PublishDir;OutputPath"/>
+  </Target>
   <Target Name="RequirePane" BeforeTargets="BeforeBuild"><Error Condition="!Exists('../../dist/index.html')" Text="Build the task pane with npm run build before building the Windows app." /></Target>
 </Project>

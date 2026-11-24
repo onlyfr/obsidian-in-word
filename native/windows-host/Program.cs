@@ -7,13 +7,14 @@ internal static class Program
     private static void Main(string[] args)
     {
         using var singleton = new Mutex(true, @"Local\ObsidianInWord.WindowsHost", out var first);
-        if (!first) { MessageBox.Show("Obsidian in Word가 이미 실행 중입니다.");return; }
+        var fromWord = args.SequenceEqual(new[] { "--from-word" });
+        if (!first) { if (!fromWord) MessageBox.Show("Obsidian in Word가 이미 실행 중입니다.");return; }
         System.Windows.Forms.Application.SetHighDpiMode(HighDpiMode.SystemAware);System.Windows.Forms.Application.EnableVisualStyles();
         using var form = new Form { Text = "Obsidian in Word", Width = 640, Height = 350, StartPosition = FormStartPosition.CenterScreen };
         using var tray = new NotifyIcon { Icon = SystemIcons.Application, Text = "Obsidian in Word", Visible = false };
         WebApplication? host = null;X509Certificate2? certificate = null;var allowClose = false;var quitRequested = false;
         var status = new Label { Dock = DockStyle.Top, Height = 80, Padding = new Padding(12), Text = "Word 연결 상태를 확인하는 중…" };
-        var help = new Label { Dock = DockStyle.Top, Height = 85, Padding = new Padding(12), Text = "처음 한 번 ‘Word 연결 설정’을 누르세요. 현재 사용자에게 localhost 인증서와 이 앱의 Word 애드인을 등록합니다.\nWord에서 홈/삽입 → 추가 기능 → 내 추가 기능의 Obsidian in Word (Windows)를 여세요.\n창을 닫아도 앱은 알림 영역에서 실행됩니다. 종료하면 작업창 연결이 끊깁니다." };
+        var help = new Label { Dock = DockStyle.Top, Height = 85, Padding = new Padding(12), Text = "처음 한 번 ‘Word 연결 설정’을 누르세요. 현재 사용자에게 localhost 인증서와 이 앱의 Word 애드인을 등록합니다.\nWord에서 홈/삽입 → 추가 기능 → 내 추가 기능의 Obsidian in Word (Windows)를 여세요.\n이후 작업창을 열면 앱이 자동으로 시작되고 마지막 Word를 종료하면 함께 종료됩니다." };
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 50, Padding = new Padding(8) };
         var setup = new Button { Text = "Word 연결 설정", AutoSize = true };var word = new Button { Text = "Word 열기", AutoSize = true };var remove = new Button { Text = "Word 연결 해제", AutoSize = true };var exit = new Button { Text = "앱 종료", AutoSize = true };
         buttons.Controls.AddRange([setup, word, remove, exit]);form.Controls.Add(buttons);form.Controls.Add(help);form.Controls.Add(status);
@@ -53,7 +54,7 @@ internal static class Program
         using var wordLifetime = new System.Windows.Forms.Timer { Interval = 1500 };
         using var currentProcess = Process.GetCurrentProcess();
         var sessionId = currentProcess.SessionId;
-        var observedWord = false;
+        var observedWord = fromWord;
         wordLifetime.Tick += async (_, _) =>
         {
             if (host is null || operations.Busy || quitRequested) return;
@@ -67,6 +68,6 @@ internal static class Program
             finally { foreach (var process in processes) process.Dispose(); }
         };
         wordLifetime.Start();
-        form.Shown += async (_, _) => await Run(Start);System.Windows.Forms.Application.Run(form);tray.Visible = false;
+        form.Shown += async (_, _) => { if (fromWord) { form.Hide(); tray.Visible = true; } await Run(Start); if (fromWord && host is null) Show(); };System.Windows.Forms.Application.Run(form);tray.Visible = false;
     }
 }

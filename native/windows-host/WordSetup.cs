@@ -19,7 +19,7 @@ internal interface ISetupStore
     void RemovePersonal(string thumbprint);
 }
 
-internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<X509Certificate2> createCertificate)
+internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<X509Certificate2> createCertificate, Func<string?>? launcherKey = null)
 {
     internal const string CertificateName = "Obsidian in Word localhost";
     internal const string Subject = "CN=localhost, O=Obsidian in Word";
@@ -37,7 +37,7 @@ internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<
     internal bool Registered()
     {
         if (store.Registration != manifestPath || store.Manifest is not string manifest) return false;
-        try { return XNode.DeepEquals(XDocument.Parse(manifest).Root, XDocument.Parse(BuildManifest()).Root); }
+        try { return XNode.DeepEquals(XDocument.Parse(manifest).Root, XDocument.Parse(BuildManifest(launcherKey?.Invoke())).Root); }
         catch (System.Xml.XmlException) { return false; }
     }
     // Return the certificate only when the host can use it. Reading startup status never repairs registration.
@@ -66,7 +66,7 @@ internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<
         CleanupPending();
         var previousManifest = store.Manifest;var previousThumb = store.Thumbprint;
         using var existing = FindCertificate();using var created = existing is null ? createCertificate() : null;
-        var nextThumb = (created ?? existing!).Thumbprint;var nextManifest = BuildManifest();
+        var nextThumb = (created ?? existing!).Thumbprint;var nextManifest = BuildManifest(launcherKey?.Invoke());
         try
         {
             if (created is not null)
@@ -109,7 +109,7 @@ internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<
         if (cert is not null && !Owned(cert)) throw new InvalidOperationException("이 앱의 인증서로 확인되지 않아 삭제하지 않았습니다.");
         store.RemoveTrust(pending);store.RemovePersonal(pending);store.Pending = null;
     }
-    internal static string BuildManifest()
+    internal static string BuildManifest(string? key = null)
     {
         using var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("host-manifest.xml")!;
         var xml = XDocument.Load(source);XNamespace ns = "http://schemas.microsoft.com/office/appforoffice/1.1";
@@ -119,6 +119,21 @@ internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<
         xml.Root.Element(ns + "Version")!.Value = "0.0.2.0";
         using var ribbon = Assembly.GetExecutingAssembly().GetManifestResourceStream("host-ribbon.xml")!;
         xml.Root.Add(XElement.Load(ribbon));
+        if (key is not null)
+        {
+            if (!Guid.TryParseExact(key,"N",out _)) throw new InvalidOperationException("Word 시작 설정을 다시 설치하세요.");
+            var launch = "https://localhost:49176/open/" + key;
+            xml.Root.Element(ns + "Hosts")!.AddBeforeSelf(new XElement(ns + "AppDomains", new XElement(ns + "AppDomain", HostServer.Origin)));
+            xml.Descendants(ns + "SourceLocation").Single().SetAttributeValue("DefaultValue",launch);
+            XNamespace bt = "http://schemas.microsoft.com/office/officeappbasictypes/1.0";
+            xml.Descendants(bt+"Url").Single().SetAttributeValue("DefaultValue",launch);
+            foreach (var image in xml.Descendants(bt+"Image").Where(x=>x.Attribute("DefaultValue")!=null))
+                image.SetAttributeValue("DefaultValue","https://localhost:49176/"+Path.GetFileName((string)image.Attribute("DefaultValue")!));
+            xml.Root.Element(ns+"Version")!.Value="1.0.0.0";
+            xml.Root.Element(ns+"AppDomains")!.AddBeforeSelf(
+                new XElement(ns+"IconUrl",new XAttribute("DefaultValue","https://localhost:49176/icon32.png")),
+                new XElement(ns+"SupportUrl",new XAttribute("DefaultValue","https://github.com/onlyfr/obsidian-in-word/issues")));
+        }
         return xml.ToString();
     }
 }
@@ -128,10 +143,10 @@ internal static class WordSetup
     internal const string Id = "6f1d7c52-3b0e-4b6a-9a52-0a1c4f6f7c13";
     internal static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ObsidianInWord");
     internal static string ManifestPath => Path.Combine(DirectoryPath, "manifest.windows.xml");
-    private static readonly SetupManager Manager = new(new WindowsSetupStore(), ManifestPath, () => CreateCertificate());
+    private static readonly SetupManager Manager = new(new WindowsSetupStore(), ManifestPath, () => CreateCertificate(), LauncherSetup.Key);
     internal static X509Certificate2? CheckConnection(out string message) => Manager.CheckConnection(out message);
-    internal static void Install() => Manager.Install();
-    internal static void Remove() => Manager.Remove();
+    internal static void Install() => LauncherSetup.Install(Manager.Install);
+    internal static void Remove() { Manager.Remove(); LauncherSetup.Remove(); }
     internal static X509Certificate2 CreateCertificate(bool persistKey = true)
     {
         using var rsa = RSA.Create(2048);var request = new CertificateRequest(SetupManager.Subject, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);

@@ -80,6 +80,40 @@ Test("legacy manifest declaration and whitespace stay registered; malformed XML 
     Must(manager.Registered(), "format-only difference invalidated registration");store.Manifest = "<invalid";Must(!manager.Registered(), "malformed manifest accepted");
 });
 
+Test("Word launcher install, update rollback, foreign registration and uninstall", () => {
+    var id = Guid.NewGuid().ToString("N");
+    var temp = Directory.CreateTempSubdirectory("oiw-launcher-");
+    var registryPath = @"Software\ObsidianInWordTests\" + id;
+    using var registry = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(registryPath);
+    const string addin = @"Software\Microsoft\Office\Word\Addins\ObsidianInWord.WordLauncher";
+    try
+    {
+        Throws(() => LauncherSetup.Install(registry,temp.FullName,() => throw new IOException("setup cancelled")));
+        using (var absent = registry.OpenSubKey(addin)) Must(absent == null && !temp.EnumerateFiles().Any(),"initial install leaked state");
+        LauncherSetup.Install(registry,temp.FullName,() => {});
+        var key = File.ReadAllText(Path.Combine(temp.FullName,"launch-key"));
+        using (var registered = registry.OpenSubKey(addin))
+            Must(Equals(registered?.GetValue("LoadBehavior"),3),"Word startup registration");
+        Throws(() => LauncherSetup.Install(registry,temp.FullName,() => throw new IOException("failed update")));
+        Must(File.ReadAllText(Path.Combine(temp.FullName,"launch-key"))==key,"existing key lost");
+        var manifest = System.Xml.Linq.XDocument.Parse(SetupManager.BuildManifest(key));
+        Must(manifest.Descendants().Count(x=> (string?)x.Attribute("DefaultValue") == "https://localhost:49176/open/"+key)==2,"both launch entries");
+        LauncherSetup.Remove(registry,temp.FullName);
+        using (var absent = registry.OpenSubKey(addin)) Must(absent == null && !temp.EnumerateFiles().Any(),"uninstall leaked files or registration");
+        using var foreign = registry.CreateSubKey(addin);
+        foreign.SetValue("FriendlyName","foreign");
+        Throws(() => LauncherSetup.Install(registry,temp.FullName,() => {}));
+        Throws(() => LauncherSetup.Remove(registry,temp.FullName));
+        Must(Equals(foreign.GetValue("FriendlyName"),"foreign"),"foreign registration modified");
+    }
+    finally
+    {
+        registry.Close();
+        Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(registryPath);
+        temp.Delete(true);
+    }
+});
+
 var entered = new TaskCompletionSource();var finish = new TaskCompletionSource();var stops = 0;
 var operations = new HostOperations(() => { stops++;return Task.CompletedTask; });
 var running = operations.TryRun(async () => { entered.SetResult();await finish.Task; });await entered.Task;
