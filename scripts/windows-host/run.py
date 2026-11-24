@@ -7,11 +7,12 @@ import subprocess
 import time
 import uuid
 import winreg
+from contextlib import ExitStack
 import argparse
 import socket
 
 repo=Path(__file__).resolve().parents[2]
-parser=argparse.ArgumentParser();parser.add_argument('--transfer-source',type=Path);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--transfer-source',type=Path);parser.add_argument('--cold-start', action='store_true');args=parser.parse_args()
 spec=importlib.util.spec_from_file_location('word_harness',repo/'scripts/word-host/run.py');harness=importlib.util.module_from_spec(spec);spec.loader.exec_module(harness)
 if b'WINWORD.EXE' in subprocess.run(['tasklist','/FI','IMAGENAME eq WINWORD.EXE','/NH'],capture_output=True).stdout:raise SystemExit('Close Word before this owned-fixture test.')
 harness.check_dev_certificate()
@@ -24,22 +25,36 @@ while True:
 run=repo/'test-docs/windows-host'/(time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6]);run.mkdir(parents=True)
 settings=sorted((Path(os.environ['LOCALAPPDATA'])/'npm-cache/_npx').glob('*/node_modules/office-addin-dev-settings'))[-1]
 harness.prepare(run,settings,49175)
-manifest=run/'manifest.xml';text=manifest.read_text().replace('https://localhost:49175/scripts/word-host/client.html','https://localhost:49175/index.html');manifest.write_text(text)
+manifest=run/'manifest.xml';text=manifest.read_text().replace('https://localhost:49175/scripts/word-host/client.html','https://localhost:49175/index.html')
+if args.cold_start:
+ from cold_start import LaunchEndpoint
+ launch=LaunchEndpoint(Path.home()/'.office-addin-dev-certs')
+ text=text.replace('https://localhost:49175/index.html',launch.url)
+ text=text.replace('<Hosts>', '<AppDomains><AppDomain>https://localhost:49175</AppDomain></AppDomains><Hosts>')
+manifest.write_text(text)
 import xml.etree.ElementTree as ET
 ident=ET.fromstring(text).find('{http://schemas.microsoft.com/office/appforoffice/1.1}Id').text
 registry=r'Software\Microsoft\Office\16.0\WEF\Developer'
 with winreg.CreateKey(winreg.HKEY_CURRENT_USER,registry) as key:winreg.SetValueEx(key,ident,0,winreg.REG_SZ,str(manifest))
 word=None
-with (run/'server.log').open('w') as server_log,(run/'word.log').open('w') as word_log:
+with ExitStack() as stack,(run/'server.log').open('w') as server_log,(run/'word.log').open('w') as word_log:
  try:
-  server=subprocess.Popen(['dotnet','run','--project',str(repo/'scripts/windows-host/Acceptance.csproj'),'-c','Release','--',str(run),str(Path.home()/'.office-addin-dev-certs')],cwd=repo,stdout=server_log,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW)
-  deadline=time.monotonic()+40
-  while not (run/'server-ready').exists():
-   if server.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Host test server failed; inspect '+str(run/'server.log'))
-   time.sleep(.1)
+  def start_server():
+   server=subprocess.Popen(['dotnet','run','--project',str(repo/'scripts/windows-host/Acceptance.csproj'),'-c','Release','--',str(run),str(Path.home()/'.office-addin-dev-certs')],cwd=repo,stdout=server_log,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW)
+   deadline=time.monotonic()+40
+   while not (run/'server-ready').exists():
+    if server.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Host test server failed; inspect '+str(run/'server.log'))
+    time.sleep(.1)
+  if args.cold_start:
+   stack.enter_context(launch.serve(start_server))
+  else:
+   start_server()
   word=subprocess.Popen(['powershell.exe','-NoProfile','-STA','-File',str(repo/'scripts/word-host/word-com.ps1'),'-RunDirectory',str(run)],cwd=repo,stdout=word_log,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW)
   harness.wait_result(run,'js','ready',90,word)
   result=harness.command(run,'js','windows-app',(repo/'scripts/windows-host/word-case.js').read_text(encoding='utf-8'),worker=word)
+  if args.cold_start:
+   if not launch.started:raise RuntimeError('Word bypassed the launch endpoint')
+   result['value']['startedOnPaneNavigation']=True
   (run/'summary.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');print('Evidence: '+str(run),flush=True)
   if args.transfer_source:
    source=json.loads(args.transfer_source.read_text(encoding='utf-8'))
