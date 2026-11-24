@@ -135,6 +135,7 @@ def main():
     parser.add_argument('--transfer-only', action='store_true', help='Export synthetic settings from the real web task pane for native transfer tests')
     parser.add_argument('--community-only', action='store_true', help='Check live community catalog/release downloads and plugin UI without keys')
     parser.add_argument('--partial-only', action='store_true', help='Check a single paragraph edit and one native Undo in a mixed document')
+    parser.add_argument('--document-font-probe', action='store_true', help='Measure Word font selection, native MathML layout and raster glyph differences')
     parser.add_argument('--math-only', action='store_true', help='Run actual raster and math output mode checks without keyboard input')
     parser.add_argument('--identity-only', action='store_true', help='Run mixed object identity and selection-scope stability checks')
     parser.add_argument('--body-controls-only', action='store_true', help='Run native body preparation start/stop UI checks without keyboard input')
@@ -299,6 +300,12 @@ def main():
                 case('js','partial-edit','partial-edit.js')
                 case('com','partial-undo','partial-undo.ps1')
                 case('js','word-text-conflicts','word-text-conflicts.js')
+                return
+            if args.document_font_probe:
+                case('js','setup','setup.js')
+                measured=case('js','document-font-probe','document-font-probe.js')['value']
+                (run/'document-font.json').write_text(json.dumps(measured,indent=2),encoding='utf-8')
+                print(f'Font measurements: {run}',flush=True)
                 return
             if args.math_only:
                 case('js','setup','setup.js')
