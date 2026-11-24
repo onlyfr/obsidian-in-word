@@ -115,7 +115,11 @@ internal sealed class SetupManager(ISetupStore store, string manifestPath, Func<
         var xml = XDocument.Load(source);XNamespace ns = "http://schemas.microsoft.com/office/appforoffice/1.1";
         xml.Root!.Element(ns + "Id")!.Value = WordSetup.Id;
         xml.Root.Element(ns + "DisplayName")!.SetAttributeValue("DefaultValue", "Obsidian in Word (Windows)");
-        xml.Descendants(ns + "SourceLocation").Single().SetAttributeValue("DefaultValue", HostServer.Origin + "/index.html");return xml.ToString();
+        xml.Descendants(ns + "SourceLocation").Single().SetAttributeValue("DefaultValue", HostServer.Origin + "/index.html");
+        xml.Root.Element(ns + "Version")!.Value = "0.0.2.0";
+        using var ribbon = Assembly.GetExecutingAssembly().GetManifestResourceStream("host-ribbon.xml")!;
+        xml.Root.Add(XElement.Load(ribbon));
+        return xml.ToString();
     }
 }
 

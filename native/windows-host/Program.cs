@@ -49,6 +49,24 @@ internal static class Program
         menu.Items.Insert(0, new ToolStripMenuItem("앱 열기", null, (_, _) => Show()));trayExit.Click += async (_, _) => await Quit();tray.ContextMenuStrip = menu;tray.DoubleClick += (_, _) => Show();
         exit.Click += async (_, _) => await Quit();
         form.FormClosing += (_, e) => { if (!allowClose){e.Cancel = true;form.Hide();tray.Visible = true;} };
+        // A setup window opened before Word starts must remain available.
+        using var wordLifetime = new System.Windows.Forms.Timer { Interval = 1500 };
+        using var currentProcess = Process.GetCurrentProcess();
+        var sessionId = currentProcess.SessionId;
+        var observedWord = false;
+        wordLifetime.Tick += async (_, _) =>
+        {
+            if (host is null || operations.Busy || quitRequested) return;
+            var processes = Process.GetProcessesByName("WINWORD");
+            try
+            {
+                if (processes.Any(process => process.SessionId == sessionId)) observedWord = true;
+                else if (observedWord) { wordLifetime.Stop(); await Quit(); }
+            }
+            catch (InvalidOperationException) { /* Word exited during enumeration. Retry next tick. */ }
+            finally { foreach (var process in processes) process.Dispose(); }
+        };
+        wordLifetime.Start();
         form.Shown += async (_, _) => await Run(Start);System.Windows.Forms.Application.Run(form);tray.Visible = false;
     }
 }

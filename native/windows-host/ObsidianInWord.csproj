@@ -6,6 +6,8 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="../../dist/**/*" Exclude="../../dist/downloads/**/*"><LogicalName>pane/%(RecursiveDir)%(Filename)%(Extension)</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="ribbon.xml" LogicalName="host-ribbon.xml"/>
+    <EmbeddedResource Include="ribbon/*.png"><LogicalName>pane/ribbon/%(Filename)%(Extension)</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="../../manifest.xml"><LogicalName>host-manifest.xml</LogicalName></EmbeddedResource>
   </ItemGroup>
   <Target Name="RequirePane" BeforeTargets="BeforeBuild"><Error Condition="!Exists('../../dist/index.html')" Text="Build the task pane with npm run build before building the Windows app." /></Target>

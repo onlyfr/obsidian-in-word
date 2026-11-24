@@ -1,0 +1,26 @@
+<VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="VersionOverridesV1_0">
+  <Hosts><Host xsi:type="Document"><DesktopFormFactor>
+    <ExtensionPoint xsi:type="PrimaryCommandSurface">
+      <OfficeTab id="TabHome"><Group id="Oiw.Group">
+        <Label resid="Oiw.GroupName"/>
+        <Icon><bt:Image size="16" resid="Icon16"/><bt:Image size="32" resid="Icon32"/><bt:Image size="80" resid="Icon80"/></Icon>
+        <Control xsi:type="Button" id="Oiw.Open">
+          <Label resid="Oiw.Name"/>
+          <Supertip><Title resid="Oiw.Name"/><Description resid="Oiw.Description"/></Supertip>
+          <Icon><bt:Image size="16" resid="Icon16"/><bt:Image size="32" resid="Icon32"/><bt:Image size="80" resid="Icon80"/></Icon>
+          <Action xsi:type="ShowTaskpane"><TaskpaneId>Oiw.Editor</TaskpaneId><SourceLocation resid="Oiw.Pane"/></Action>
+        </Control>
+      </Group></OfficeTab>
+    </ExtensionPoint>
+  </DesktopFormFactor></Host></Hosts>
+  <Resources>
+    <bt:Images>
+      <bt:Image id="Icon16" DefaultValue="https://localhost:49175/ribbon/icon16.png"/>
+      <bt:Image id="Icon32" DefaultValue="https://localhost:49175/ribbon/icon32.png"/>
+      <bt:Image id="Icon80" DefaultValue="https://localhost:49175/ribbon/icon80.png"/>
+    </bt:Images>
+    <bt:Urls><bt:Url id="Oiw.Pane" DefaultValue="https://localhost:49175/index.html"/></bt:Urls>
+    <bt:ShortStrings><bt:String id="Oiw.GroupName" DefaultValue="Markdown"/><bt:String id="Oiw.Name" DefaultValue="Obsidian in Word"/></bt:ShortStrings>
+    <bt:LongStrings><bt:String id="Oiw.Description" DefaultValue="Open the Markdown editor for this document."/></bt:LongStrings>
+  </Resources>
+</VersionOverrides>
